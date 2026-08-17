@@ -30,10 +30,19 @@ lib/
 ## 4. Critical Telemetry Pipeline
 
 ```
-SensorService
-   → TelemetryEngine
-   → TelemetrySnapshot
-   → DashboardSensorStreams.snapshot   (single shared broadcast stream)
+SensorService                          (single source of the physical sensors)
+   → TelemetryEngine                   (consumes the shared SensorService instance;
+                                          produces filtered/fused signals — speed,
+                                          altitude, altitude trend, heading, GNSS
+                                          quality, g-force filtering — but does NOT
+                                          build TelemetrySnapshot itself)
+   → DashboardSensorStreams            (combines TelemetryEngine's signals with
+                                          geometry-derived signals taken directly from
+                                          SensorService — e.g. pitch/roll, g-force
+                                          vehicle-axis mapping — plus any other raw
+                                          fields the snapshot needs; this is the class
+                                          that constructs TelemetrySnapshot)
+   → DashboardSensorStreams.snapshot   (single shared broadcast Stream<TelemetrySnapshot>)
    → consumers:
         - DrivingSessionRecorder
         - EventDetectionEngine
@@ -41,7 +50,11 @@ SensorService
         - DashcamSessionController
 ```
 
-**Critical rule:** new telemetry consumers must listen to the existing shared `DashboardSensorStreams.snapshot` stream. Do **not** create a new, independent connection to `SensorService` to obtain the same data.
+**Critical rule:** new *functional* telemetry consumers must listen to the existing shared `DashboardSensorStreams.snapshot` stream. Do **not** create a new, independent connection to `SensorService` to obtain the same data.
+
+**Deliberate, diagnostics-only exception:** `DiagnosticsScreen` observes a few raw shared streams (accelerometer/gyroscope/position) alongside `snapshot`, solely to display sensor sample-rate/age/health that the throttled snapshot doesn't carry. It reuses the same `SensorService`/`DashboardSensorStreams` instance passed to it — it does not create its own `SensorService` and does not open a parallel pipeline. This exception is not a pattern to replicate for new features; any new functional consumer follows the critical rule above.
+
+**Known bypass surface:** `DashboardSensorStreams.engine` (the `TelemetryEngine` instance) is currently a public field with no known external consumers. Reaching into it directly would bypass the central `snapshot` stream. No code change is tracked for this yet — flag it if a change proposes consuming `.engine` directly instead of `.snapshot`.
 
 `EventDetectionEngine` is the single, central event detector. Do not duplicate detection logic elsewhere. `AlertEngine` must not take over `EventDetectionEngine`'s role — it presents/gates alerts, it does not independently re-detect the same phenomena.
 
