@@ -137,3 +137,28 @@ A task is not done just because the code was changed. When applicable, completio
 6. diff review
 7. documentation of relevant decisions
 8. a coherent Git state
+
+## 12. Multi-Agent Collaboration Protocol
+
+This project follows a defined multi-agent workflow:
+
+- **Codex** — architectural analysis, technical planning, and independent code review.
+- **Claude Code** — implementation, running tests, and applying fixes.
+- **Git** — history and reversibility.
+- **User** — decisions on goals, scope, and architecturally-relevant changes.
+
+**Task tiers:**
+- Small: Claude Code → validation → commit.
+- Medium: Codex (analysis) → Claude Code (implementation) → validation → commit.
+- Critical: Codex (initial analysis) → Claude Code (implementation) → Codex (independent code review) → Claude Code (adjustments, if needed) → final validation → Git commit.
+
+Treat a task as critical, when applicable, if it touches: telemetry; sensors/GNSS; filters/fusion; `DashboardSensorStreams`; `TelemetrySnapshot`; event detection; Hive persistence; camera/dashcam; video/telemetry synchronization; concurrency/lifecycle; performance/memory; architectural changes; or changes that could affect real-hardware validation.
+
+**Operational rules:**
+- Codex and Claude Code must not edit the same workspace at the same time — one agent finishes its step before the other starts the next one.
+- For a critical task, the implementing agent must not be the sole reviewer of its own change.
+- Independent code review is read-only.
+- A commit must not bundle changes unrelated to the task at hand.
+- Validate before committing, per §7/§8, and treat a task as done only per §11.
+- Architecturally-relevant changes remain the user's decision to make.
+- This protocol does not itself authorize push, remote creation, destructive resets, or dependency installation — §9 and §10 keep governing those regardless of which agent is acting.
