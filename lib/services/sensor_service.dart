@@ -29,6 +29,17 @@ abstract class SensorProvider<T> {
   Future<void> dispose();
 }
 
+/// The resources [SensorService] owns for one
+/// [SensorService.registerExternalProvider] registration — the broadcast
+/// [controller] every [SensorService.externalStream] call reads from, paired
+/// with the upstream [subscription] feeding it, so a key replacement or
+/// [SensorService.dispose] can tear down the exact previous source instead
+/// of leaking its subscription.
+typedef _ExternalProviderBinding = ({
+  StreamController<Object?> controller,
+  StreamSubscription<Object?> subscription,
+});
+
 /// Unifies every sensor/telemetry source the app reads from behind one
 /// service with a single broadcast stream per signal.
 ///
@@ -81,7 +92,7 @@ class SensorService {
   StreamSubscription<MagnetometerEvent>? _magnetometerSub;
   StreamSubscription<BarometerEvent>? _barometerSub;
 
-  final Map<String, StreamController<Object?>> _externalControllers = {};
+  final Map<String, _ExternalProviderBinding> _externalProviders = {};
 
   /// Vehicle speed, sourced from the platform location provider.
   Stream<SpeedReading> get speedStream {
@@ -171,21 +182,46 @@ class SensorService {
   /// ambient noise meter) so it can be consumed through this same service
   /// instance via [externalStream], without changing this class' existing
   /// public API.
+  ///
+  /// Registering under a [key] already in use replaces it: cancelling the
+  /// previous binding's subscription and closing its controller are both
+  /// *requested* — `unawaited`, this class' usual fire-and-forget
+  /// cancellation convention (see e.g. [_stopAccelerometer]) — before the new
+  /// [source] is connected; this method itself never awaits anything, so it
+  /// stays synchronous, and neither `Future` is guaranteed to have completed
+  /// by the time the new [source] is connected. That's still enough to keep
+  /// a straggling in-flight event from the old [source] from ever hitting
+  /// `controller.add` after `close()` (which would throw `StateError`):
+  /// per the `Stream` contract, [StreamSubscription.cancel] stops further
+  /// delivery to that subscription's callbacks as soon as it's *called*,
+  /// regardless of when the `Future` it returns completes. [dispose] tears
+  /// down every remaining registration the same way.
   void registerExternalProvider<T extends Object>(String key, Stream<T> source) {
+    final previous = _externalProviders.remove(key);
+    if (previous != null) {
+      unawaited(previous.subscription.cancel());
+      unawaited(previous.controller.close());
+    }
     final controller = StreamController<T>.broadcast();
-    source.listen(controller.add, onError: controller.addError);
-    _externalControllers[key] = controller;
+    final subscription = source.listen(
+      controller.add,
+      onError: controller.addError,
+      // Lets `externalStream(key)` terminate correctly if the source itself
+      // ends, rather than leaving that controller silently open forever.
+      onDone: controller.close,
+    );
+    _externalProviders[key] = (controller: controller, subscription: subscription);
   }
 
   /// Retrieves the stream registered under [key] via
   /// [registerExternalProvider]. Throws a [StateError] if nothing was
   /// registered under that key yet.
   Stream<T> externalStream<T extends Object>(String key) {
-    final controller = _externalControllers[key];
-    if (controller == null) {
+    final binding = _externalProviders[key];
+    if (binding == null) {
       throw StateError('No external sensor provider registered under "$key"');
     }
-    return controller.stream.cast<T>();
+    return binding.controller.stream.cast<T>();
   }
 
   /// [speedStream], [altitudeStream] and [positionStream] all call this on
@@ -382,9 +418,10 @@ class SensorService {
     await _gyroscopeController?.close();
     await _magnetometerController?.close();
     await _barometerController?.close();
-    for (final controller in _externalControllers.values) {
-      await controller.close();
+    for (final binding in _externalProviders.values) {
+      unawaited(binding.subscription.cancel());
+      await binding.controller.close();
     }
-    _externalControllers.clear();
+    _externalProviders.clear();
   }
 }
