@@ -76,6 +76,13 @@ dev_dependencies:
   build_runner: ^2.4.13
   hive_generator: ^2.0.1
 
+# R4.4-HW-MIG-4: camera_android_camerax 0.7.4+8 plus one Android filter that stops forwarding
+# VideoRecordEvent.Status to Dart. Same version as the pin above; provenance, verification and
+# removal: third_party/camera_android_camerax_status_filter/README.md.
+dependency_overrides:
+  camera_android_camerax:
+    path: third_party/camera_android_camerax_status_filter/package
+
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
 

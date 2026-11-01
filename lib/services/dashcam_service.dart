@@ -1546,7 +1546,7 @@ class DashcamService {
   ///
   /// Physical finding (Samsung SM-A326B, 2026-10-07, debug build, validation
   /// campaign of R2.6.13): 1 of 24 segment rotations never recorded again.
-  /// `camera_android_camerax 0.7.4+8` forwards every CameraX
+  /// The published `camera_android_camerax 0.7.4+8` forwards every CameraX
   /// `VideoRecordEvent.Status` (one per encoded frame) to Dart and buffers
   /// them until `stopVideoRecording()`; when the Dart GC later releases those
   /// ~5,400 objects of a 3-minute segment, the resulting message flood keeps
@@ -1559,6 +1559,11 @@ class DashcamService {
   /// backgrounded and resumed (the UI offers no retry in that state). Before
   /// Fase 16.2 the stop had no deadline at all — a slow one only lengthened
   /// the gap between two clips.
+  ///
+  /// R4.4-HW-MIG-4: the app now uses a copy of the plugin that drops `Status`
+  /// before Dart (`third_party/camera_android_camerax_status_filter`), which
+  /// removed this flood in the SM-A125M measurements. A stop can still be late
+  /// for other reasons, so the rule below stands.
   ///
   /// The deadline is therefore, for a rotation, a liveness/diagnostic signal
   /// only: callers stop waiting ([_PendingNativeStop.visibleSignal]) and the

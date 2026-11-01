@@ -1,0 +1,16 @@
+--- a/android/src/main/java/io/flutter/plugins/camerax/VideoRecordEventListenerProxyApi.java
++++ b/android/src/main/java/io/flutter/plugins/camerax/VideoRecordEventListenerProxyApi.java
+@@ -31,6 +31,13 @@
+ 
+     @Override
+     public void onEvent(@NonNull VideoRecordEvent event) {
++      // Synapse Auto (R4.4-HW-MIG-4): CameraX emits one Status per encoded frame and nothing in
++      // Dart reads it. Forwarding it creates one Pigeon proxy per frame (~5,400 in a 3-minute
++      // segment); releasing them in one Dart GC floods the main thread for seconds, and on the
++      // SM-A125M that delayed the next recording by 7-20 s.
++      if (event instanceof VideoRecordEvent.Status) {
++        return;
++      }
+       api.getPigeonRegistrar()
+           .runOnMainThread(
+               new ProxyApiRegistrar.FlutterMethodRunnable() {

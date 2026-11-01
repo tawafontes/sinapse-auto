@@ -1,0 +1,2 @@
+# verify.sh compares this tree byte for byte with the upstream archive plus the patches: keep LF.
+* text=auto eol=lf

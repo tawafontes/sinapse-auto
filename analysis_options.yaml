@@ -26,3 +26,10 @@ linter:
 
 # Additional information about this file can be found at
 # https://dart.dev/guides/language/analysis-options
+
+analyzer:
+  exclude:
+    # Vendored plugin copy: its tests and Pigeon definitions need dev dependencies the app doesn't
+    # have. Its lib/ stays analyzed on purpose.
+    - third_party/camera_android_camerax_status_filter/package/test/**
+    - third_party/camera_android_camerax_status_filter/package/pigeons/**

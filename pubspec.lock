@@ -116,10 +116,9 @@ packages:
   camera_android_camerax:
     dependency: "direct main"
     description:
-      name: camera_android_camerax
-      sha256: "977f54512d338b3b36d7f82929794886766d8f41ae84a48fe103eb0106ecfe25"
-      url: "https://pub.dev"
-    source: hosted
+      path: "third_party/camera_android_camerax_status_filter/package"
+      relative: true
+    source: path
     version: "0.7.4+8"
   camera_avfoundation:
     dependency: transitive
