@@ -19,7 +19,6 @@ class DrivingSessionAdapter extends TypeAdapter<DrivingSession> {
     return DrivingSession(
       id: fields[0] as String,
       startTime: fields[1] as DateTime,
-      endTime: fields[2] as DateTime?,
       distanceMeters: fields[3] as double,
       maxSpeedKmh: fields[4] as double?,
       avgSpeedKmh: fields[5] as double?,
@@ -44,19 +43,24 @@ class DrivingSessionAdapter extends TypeAdapter<DrivingSession> {
       events: fields[24] == null
           ? []
           : (fields[24] as List?)?.cast<DrivingSessionEvent>(),
-    );
+      deletionPending: fields[25] == null ? false : fields[25] as bool,
+      dashcamTelemetryOutcomeCode: fields[26] as int?,
+      dashcamTelemetryAcceptedCount: fields[27] as int?,
+      dashcamTelemetryPersistedCount: fields[28] as int?,
+      dashcamTelemetryRefusedCount: fields[29] as int?,
+    ).._storedEndTime = fields[2] as DateTime?;
   }
 
   @override
   void write(BinaryWriter writer, DrivingSession obj) {
     writer
-      ..writeByte(25)
+      ..writeByte(30)
       ..writeByte(0)
       ..write(obj.id)
       ..writeByte(1)
       ..write(obj.startTime)
       ..writeByte(2)
-      ..write(obj.endTime)
+      ..write(obj._storedEndTime)
       ..writeByte(3)
       ..write(obj.distanceMeters)
       ..writeByte(4)
@@ -100,7 +104,17 @@ class DrivingSessionAdapter extends TypeAdapter<DrivingSession> {
       ..writeByte(23)
       ..write(obj.altitudeLossMeters)
       ..writeByte(24)
-      ..write(obj.events);
+      ..write(obj.events)
+      ..writeByte(25)
+      ..write(obj.deletionPending)
+      ..writeByte(26)
+      ..write(obj.dashcamTelemetryOutcomeCode)
+      ..writeByte(27)
+      ..write(obj.dashcamTelemetryAcceptedCount)
+      ..writeByte(28)
+      ..write(obj.dashcamTelemetryPersistedCount)
+      ..writeByte(29)
+      ..write(obj.dashcamTelemetryRefusedCount);
   }
 
   @override

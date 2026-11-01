@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import '../../models/dashcam_status.dart';
 import '../../screens/settings/dashcam_settings_screen.dart';
 import '../../services/dashcam_session_controller.dart';
+import '../../services/driving_session_recorder.dart' show SessionAdmissionRejected;
 
 /// The Dashcam fullscreen `content` (pushed via the same `SensorFullscreenScreen`
 /// every other instrument uses, Fase 15) — a live [CameraPreview] with a
@@ -107,6 +108,19 @@ class _StatusBar extends StatelessWidget {
   }
 }
 
+/// Fase 16.2-R4.3-R2.6.4: this button may have been rendered a moment before a
+/// start became unavailable (a stop issued elsewhere); the controller then
+/// refuses with [SessionAdmissionRejected] before touching anything, and its own
+/// notification rebuilds this view — so that one, expected refusal is not an
+/// error here. Any other error still propagates.
+void _startFromTile(DashcamSessionController controller) {
+  try {
+    controller.startSession();
+  } on SessionAdmissionRejected {
+    // Expected and side-effect-free — see above.
+  }
+}
+
 class _EmptyState extends StatelessWidget {
   const _EmptyState({required this.controller});
 
@@ -116,6 +130,7 @@ class _EmptyState extends StatelessWidget {
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     final status = controller.status;
+    final canStart = controller.canStartSession;
 
     late final IconData icon;
     late final String message;
@@ -132,9 +147,18 @@ class _EmptyState extends StatelessWidget {
         );
       case DashcamStatus.idle:
         icon = Icons.videocam_outlined;
-        message = 'Nenhuma sessão em andamento';
+        // Fase 16.2-R4.3-R2.6.4: say why a start is unavailable — the previous
+        // session is still being finalized, or its finalization failed and must
+        // be retried from the session screen.
+        message = controller.sessionFinalizationFailed
+            ? 'A sessão anterior não pôde ser salva. Finalize-a novamente na tela da sessão.'
+            : (canStart ? 'Nenhuma sessão em andamento' : 'Finalizando a sessão anterior…');
         action = FilledButton.icon(
-          onPressed: () => controller.startSession(),
+          // Fase 16.2-R4.3-R2.6.1: the previous session may still be ending (its
+          // camera side can already be idle) — see
+          // [DashcamSessionController.canStartSession]; the controller notifies
+          // once it flips back, which rebuilds this view.
+          onPressed: canStart ? () => _startFromTile(controller) : null,
           icon: const Icon(Icons.play_arrow),
           label: const Text('Iniciar sessão'),
         );
@@ -149,6 +173,13 @@ class _EmptyState extends StatelessWidget {
         icon = Icons.videocam_outlined;
         message = 'Preparando pré-visualização…';
         action = const Padding(padding: EdgeInsets.only(top: 8), child: SizedBox(width: 28, height: 28, child: CircularProgressIndicator()));
+      case DashcamStatus.cameraUnavailable:
+        // Fase 16.2-R1: expected, self-recovering — not an error needing a
+        // manual retry (see DashcamStatus.cameraUnavailable's own doc), so
+        // no action button, same calm framing as idle/initializing (§10).
+        icon = Icons.videocam_outlined;
+        message = 'Câmera temporariamente indisponível';
+        action = const SizedBox.shrink();
       case DashcamStatus.error:
         icon = Icons.error_outline;
         message = controller.errorMessage ?? 'Erro na câmera';
@@ -156,6 +187,17 @@ class _EmptyState extends StatelessWidget {
           onPressed: () => controller.retryCamera(),
           icon: const Icon(Icons.refresh),
           label: const Text('Tentar novamente'),
+        );
+      case DashcamStatus.finalizing:
+        // Fase 16.2-R4.3-R2.6.10: the camera is already free (a new session
+        // may start and use it); the previous session's telemetry file is
+        // still being finalized, so this is not "Nenhuma sessão em andamento".
+        icon = Icons.videocam_outlined;
+        message = 'Finalizando a gravação anterior…';
+        action = FilledButton.icon(
+          onPressed: canStart ? () => _startFromTile(controller) : null,
+          icon: const Icon(Icons.play_arrow),
+          label: const Text('Iniciar sessão'),
         );
     }
 

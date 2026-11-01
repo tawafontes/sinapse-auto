@@ -10,19 +10,11 @@ import '../../models/detected_event.dart';
 import '../../models/display_style_metadata.dart';
 import '../../models/sensor_type_metadata.dart';
 import '../../models/sensor_widget_config.dart';
-import '../../services/alert_engine.dart';
 import '../../services/alert_preferences.dart';
 import '../../services/app_settings.dart';
 import '../../services/dashboard_layout_engine.dart';
 import '../../services/dashboard_maintenance_service.dart';
-import '../../services/dashboard_sensor_streams.dart';
-import '../../services/dashcam_preferences.dart';
-import '../../services/dashcam_service.dart';
-import '../../services/dashcam_session_controller.dart';
-import '../../services/driving_session_recorder.dart';
-import '../../services/event_detection_engine.dart';
-import '../../services/power_profile_preferences.dart';
-import '../../services/sensor_service.dart';
+import '../../services/driving_session_host.dart';
 import '../../services/sensor_widget_repository.dart';
 import '../../services/theme_controller.dart';
 import '../../widgets/dashboard/dashboard_tile.dart';
@@ -137,8 +129,16 @@ const Duration kDashboardPageTransitionDuration = Duration(milliseconds: 250);
 /// its own visuals into the app's `Overlay` for that same span, this is what
 /// keeps it completely unaffected by any rebuild happening underneath
 /// (reflow, a page switch, even a brand new page being created mid-drag).
+///
+/// Fase 16.2-R4.3-R2.6.8: this screen owns no session object. The sensor
+/// pipeline, the driving session, the event/alert engines and the dashcam
+/// belong to the app's [DrivingSessionHost] (read from [DrivingSessionScope]);
+/// this screen renders them and forwards the user's intents. It is replaced
+/// by a new instance in normal use (Tema → Concluir, "+" → Continuar), and the
+/// new one is mounted while the old one is still on screen (~30 frames) — so
+/// nothing a session depends on may start or end with it.
 class DashboardScreen extends StatefulWidget {
-  const DashboardScreen({super.key, this.preferredPage, this.powerProfile});
+  const DashboardScreen({super.key, this.preferredPage});
 
   /// Which page a newly-added tool should try to land on first, and which
   /// page the view opens to — set when this screen is reached from the
@@ -146,16 +146,6 @@ class DashboardScreen extends StatefulWidget {
   /// Null when reached any other way (app boot, Settings), which just opens
   /// on page 0 and scans placement from there.
   final int? preferredPage;
-
-  /// Passed as a constructor parameter (not read via
-  /// `PowerProfilePreferencesScope.of(context)` inside this screen) because
-  /// [TelemetryEngine] needs it synchronously in `initState`, before this
-  /// widget's own `BuildContext` has any inherited-widget dependencies
-  /// resolved — every call site can reach the single shared instance via
-  /// that same scope from its own, already-mounted context. Null falls
-  /// back to [PowerProfile.normal]'s fixed rates (see [TelemetryEngine]'s
-  /// own doc) — the exact behavior this app had before profiles existed.
-  final PowerProfilePreferences? powerProfile;
 
   @override
   State<DashboardScreen> createState() => _DashboardScreenState();
@@ -213,20 +203,13 @@ enum _EdgePagingPhase {
 class _DashboardScreenState extends State<DashboardScreen> {
   static const _maxPages = 5;
 
-  late final SensorService _sensorService;
-  late final DashboardSensorStreams _streams;
-  late final DrivingSessionRecorder _sessionRecorder;
-  AlertEngine? _alertEngine;
-  // Constructed in didChangeDependencies (needs DashcamPreferencesScope.of(context),
-  // same timing as _alertEngine/_eventEngine below) — always exists once
-  // constructed, regardless of whether Dashcam is enabled;
-  // DashcamSessionController.status reports DashcamStatus.disabled on its
-  // own for that case (see its own doc).
-  DashcamPreferences? _dashcamPreferences;
-  DashcamService? _dashcamService;
-  DashcamSessionController? _dashcamController;
+  /// The app's session host — read once from [DrivingSessionScope] in
+  /// [didChangeDependencies]; never built, owned or disposed here.
+  DrivingSessionHost? _host;
+  DrivingSessionHost get _session => _host!;
+
+  /// This view's own banner subscriptions to the host's engines.
   StreamSubscription<AlertEvent>? _alertSub;
-  EventDetectionEngine? _eventEngine;
   StreamSubscription<DetectedEvent>? _eventSub;
   late final PageController _pageController;
   late List<SensorWidgetConfig> _configs;
@@ -320,65 +303,24 @@ class _DashboardScreenState extends State<DashboardScreen> {
   @override
   void initState() {
     super.initState();
-    _sensorService = SensorService();
-    _streams = DashboardSensorStreams(_sensorService, powerProfile: widget.powerProfile);
-    _sessionRecorder = DrivingSessionRecorder(_streams.snapshot);
-    // A session left `isActive` (no endTime) can only be an orphan from a
-    // run that was killed before stopSession() ever ran — this fresh
-    // recorder instance hasn't started anything yet. See
-    // DrivingSessionRecorder.reclaimOrphanedSessions's own doc for why this
-    // matters: without it, such a session's already-flushed data would sit
-    // in Hive forever, permanently invisible on the History screen.
-    unawaited(DrivingSessionRecorder.reclaimOrphanedSessions());
     _configs = SensorWidgetRepository.all;
     _currentPage = _clampPage(widget.preferredPage ?? AppSettings.dashboardLastViewedPage);
     _pageController = PageController(initialPage: _currentPage);
   }
 
-  // AlertEngine/EventDetectionEngine both need AlertPreferencesScope.of(context),
-  // which (per its own InheritedWidget contract) isn't safe to call from
-  // initState — built exactly once (guarded by the null check) on the first
-  // dependency pass, consuming the SAME _streams.snapshot every other
-  // consumer does, no second sensor connection.
+  // DrivingSessionScope (per its own InheritedWidget contract) isn't safe to
+  // read from initState — resolved exactly once, on the first dependency pass.
+  // Only this screen's banners are subscribed here; recording events into the
+  // session is the host's job, done once however many dashboards are mounted.
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    if (_alertEngine == null) {
-      _alertEngine = AlertEngine(_streams.snapshot, AlertPreferencesScope.of(context));
-      _alertSub = _alertEngine!.events.listen(_handleAlertEvent);
+    if (_host == null) {
+      final host = DrivingSessionScope.of(context);
+      _host = host;
+      _alertSub = host.alertEngine.events.listen(_handleAlertEvent);
+      _eventSub = host.eventEngine.events.listen(_handleDetectedEvent);
     }
-    if (_eventEngine == null) {
-      _eventEngine = EventDetectionEngine(_streams.snapshot, AlertPreferencesScope.of(context));
-      // Runs continuously (Fase 13 §33), regardless of whether a session is
-      // currently being recorded — `recordDetectedEvent` itself is the
-      // no-op when there's nothing active to associate the event with.
-      _eventSub = _eventEngine!.events.listen(_handleDetectedEvent);
-    }
-    if (_dashcamController == null) {
-      // Fase 15 — the only new listener on the already-shared snapshot/event
-      // streams; never a second sensor path. DashcamService is constructed
-      // fresh here (not reused across app runs) and owns exactly one
-      // CameraController for this screen's whole lifetime (see its own doc).
-      final dashcamPreferences = DashcamPreferencesScope.of(context);
-      _dashcamPreferences = dashcamPreferences;
-      final dashcamService = DashcamService(config: dashcamPreferences.config);
-      _dashcamService = dashcamService;
-      dashcamPreferences.addListener(_onDashcamPreferencesChanged);
-      _dashcamController = DashcamSessionController(
-        dashcamService: dashcamService,
-        dashcamPreferences: dashcamPreferences,
-        sessionRecorder: _sessionRecorder,
-        snapshotStream: _streams.snapshot,
-        eventStream: _eventEngine!.events,
-      );
-    }
-  }
-
-  /// Keeps [DashcamService]'s own config in sync with live changes made in
-  /// `DashcamSettingsScreen` (e.g. a resolution change) — takes effect on
-  /// the next camera `initialize()`, i.e. the next session start.
-  void _onDashcamPreferencesChanged() {
-    _dashcamService?.updateConfig(_dashcamPreferences!.config);
   }
 
   /// The one place any alert is actually shown — a brief [SnackBar], the
@@ -400,17 +342,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   /// Every confirmed [DetectedEvent] always gets persisted to the active
-  /// session (or silently dropped if none is active — see
-  /// [DrivingSessionRecorder.recordDetectedEvent]'s own doc), unconditionally
-  /// — an event belongs in driving history regardless of whether the user
-  /// currently wants a live interruption for it. Separately, if this event's
+  /// session, unconditionally — an event belongs in driving history
+  /// regardless of whether the user currently wants a live interruption for
+  /// it. Since Fase 16.2-R4.3-R2.6.8 that persistence is
+  /// [DrivingSessionHost]'s, not this screen's (two dashboards mounted during
+  /// a recreation would otherwise record it twice). Here, if this event's
   /// type has a live-banner equivalent (see [alertTypeForDetectedEvent]) and
   /// the user hasn't disabled it, the same [SnackBar] mechanism
   /// [_handleAlertEvent] uses shows it — one confirmed event, at most one
   /// visible effect, never two independently-timed decisions about the same
   /// real-world moment (Fase 13.1 §1/§2).
   void _handleDetectedEvent(DetectedEvent event) {
-    _sessionRecorder.recordDetectedEvent(event);
     final alertType = alertTypeForDetectedEvent(event.type);
     if (alertType == null || !mounted) return;
     // Level-based delegated types (acceleration/braking/cornering/
@@ -447,16 +389,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
     setState(() => _alertColors[type] = color);
   }
 
+  /// Only this view's own resources: the session, its pipeline and the camera
+  /// belong to [DrivingSessionHost] and outlive this screen.
   @override
   void dispose() {
     _edgeHoverTimer?.cancel();
     _pageController.dispose();
-    _sensorService.dispose();
-    _sessionRecorder.dispose();
     _alertSub?.cancel();
     _eventSub?.cancel();
-    _dashcamPreferences?.removeListener(_onDashcamPreferencesChanged);
-    _dashcamController?.dispose();
     super.dispose();
   }
 
@@ -977,7 +917,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         builder: (_) => SensorFullscreenScreen(
           label: params.label,
           icon: params.icon,
-          content: buildDashboardSensorWidget(config.sensorType, config.displayStyle, _streams),
+          content: buildDashboardSensorWidget(config.sensorType, config.displayStyle, _session.streams),
           onDelete: params.onDelete,
           onChangeStyle: params.onChangeStyle,
           onResetRecords: params.onResetRecords,
@@ -994,7 +934,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   /// that slot for "Proteger este clipe" instead, matching how inclination
   /// already reuses it for "Calibrar".
   void _openDashcamFullscreen() {
-    final controller = _dashcamController!;
+    final controller = _session.dashcamController;
     Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => SensorFullscreenScreen(
@@ -1181,8 +1121,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       title: const Text('Synapse Auto'),
       actions: [
         IconButton(icon: const Icon(Icons.add), tooltip: 'Adicionar ferramenta', onPressed: _addTool),
-        if (_dashcamController != null)
-          DashcamRecIndicator(controller: _dashcamController!, onTap: _openDashcamFullscreen),
+        DashcamRecIndicator(controller: _session.dashcamController, onTap: _openDashcamFullscreen),
         IconButton(
           icon: const Icon(Icons.settings_backup_restore),
           tooltip: 'Resetar e calibrar sistema',
@@ -1194,9 +1133,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
           onPressed: () => Navigator.of(context).push(
             MaterialPageRoute(
               builder: (_) => SettingsMenuScreen(
-                streams: _streams,
-                sessionRecorder: _sessionRecorder,
-                dashcamController: _dashcamController,
+                streams: _session.streams,
+                sessionRecorder: _session.recorder,
+                dashcamController: _session.dashcamController,
               ),
             ),
           ),
@@ -1407,7 +1346,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       content: buildDashboardSensorWidget(
         config.sensorType,
         config.displayStyle,
-        _streams,
+        _session.streams,
         onAlertColorChanged: (color) => _setAlertColor(config.sensorType, color),
         onResetRequested: (type, trigger) => _resetTriggers[type] = trigger,
         onImmediateResetRequested: (type, trigger) => _immediateResetTriggers[type] = trigger,

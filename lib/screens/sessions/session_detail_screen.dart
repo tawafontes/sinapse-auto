@@ -212,6 +212,9 @@ class _ResumoTab extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final prefs = UnitPreferencesScope.of(context);
+    // Fase 16.2-R4.3-R2.6.11: how this session's dashcam telemetry ended, from
+    // its own record — absent for a session with no recorded outcome.
+    final telemetry = dashcamTelemetryOutcomeSummary(session);
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
@@ -257,6 +260,7 @@ class _ResumoTab extends StatelessWidget {
                 ),
                 _StatRow('Amostras', '${session.sampleCount}'),
                 _StatRow('Eventos', '${session.events.length}'),
+                if (telemetry != null) _StatRow('Telemetria da dashcam', '${telemetry[0].toUpperCase()}${telemetry.substring(1)}'),
               ],
             ),
           ),

@@ -37,6 +37,12 @@ dependencies:
   sensors_plus: ^7.1.0
   geolocator: ^14.0.3
   camera: ^0.12.0+2
+  # Pinned exact (not ^) — Fase 16.2-R4.1A: this is the specific version
+  # physically validated (R3-A/R3-C) to clear the stale recording/
+  # pendingRecording handles on dispose() that 0.7.4+2 left behind (Fase
+  # 16.2 R2's confirmed false-recording root cause). Future upgrades are a
+  # deliberate decision, not an incidental pub resolution.
+  camera_android_camerax: 0.7.4+8
   hive: ^2.2.3
   hive_flutter: ^1.1.0
   wakelock_plus: ^1.7.0

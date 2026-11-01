@@ -84,11 +84,29 @@ class _DashcamRecIndicatorState extends State<DashcamRecIndicator> {
         color = colorScheme.error;
         final startedAt = widget.controller.recordingStartedAt;
         final elapsed = startedAt == null ? null : DateTime.now().difference(startedAt);
-        tooltip = elapsed == null ? 'Gravando' : 'Gravando · ${_formatElapsed(elapsed)}';
+        final recording = elapsed == null ? 'Gravando' : 'Gravando · ${_formatElapsed(elapsed)}';
+        // Fase 16.2-R4.3-R2.6.10: video is still being recorded, but its
+        // telemetry file failed (see DashcamSessionController.telemetryFailureMessage).
+        final telemetryFailure = widget.controller.telemetryFailureMessage;
+        tooltip = telemetryFailure == null ? recording : '$recording\n$telemetryFailure';
+      case DashcamStatus.cameraUnavailable:
+        // Fase 16.2-R1: deliberately NOT the REC icon/color — no video is
+        // actually being captured right now, however briefly (see
+        // DashcamStatus.cameraUnavailable's own doc). Calm, not alarmist
+        // (§10): same neutral icon as idle/initializing, not the error icon.
+        icon = Icons.videocam_outlined;
+        color = colorScheme.onSurfaceVariant;
+        tooltip = 'Câmera indisponível';
       case DashcamStatus.error:
         icon = Icons.videocam_off;
         color = colorScheme.error;
         tooltip = widget.controller.errorMessage ?? 'Erro na câmera';
+      case DashcamStatus.finalizing:
+        // Fase 16.2-R4.3-R2.6.10: camera released, the stopped session's
+        // telemetry file still being finalized — not "ready" yet.
+        icon = Icons.videocam_outlined;
+        color = colorScheme.onSurfaceVariant;
+        tooltip = 'Finalizando a gravação anterior…';
     }
 
     return IconButton(icon: Icon(icon, color: color), tooltip: tooltip, onPressed: widget.onTap);

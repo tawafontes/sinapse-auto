@@ -3,6 +3,7 @@ import '../models/alert_type.dart';
 import '../models/telemetry_snapshot.dart';
 import 'alert_preferences.dart';
 import 'gnss_quality.dart' show GnssQuality;
+import 'ref_counted_broadcast.dart';
 
 /// Central alert logic — but, as of Fase 13.1, **only** for the two
 /// [AlertType]s that have no [EventDetectionEngine] equivalent:
@@ -55,9 +56,18 @@ class AlertEngine {
   /// responsibility now.
   static const _ownedTypes = {AlertType.highInclination, AlertType.weakGnss};
 
-  late final Stream<AlertEvent> events = _buildStream();
+  /// Subscribed to the snapshot stream only while listened to — see
+  /// [RefCountedBroadcast] (Fase 16.2-R4.3-R2.6.8: this used to be a bare
+  /// `asBroadcastStream()`, which never released it).
+  late final RefCountedBroadcast<AlertEvent> _events = RefCountedBroadcast<AlertEvent>(_detectTransitions);
 
-  Stream<AlertEvent> _buildStream() {
+  late final Stream<AlertEvent> events = _events.stream;
+
+  /// Ends [events] and releases the snapshot stream. Terminal.
+  void dispose() => _events.dispose();
+
+  /// One listening period's detector — fresh hysteresis/cooldown state.
+  Stream<AlertEvent> _detectTransitions() {
     final active = <AlertType, bool>{};
     final lastFiredAt = <AlertType, DateTime>{};
 
@@ -86,7 +96,7 @@ class AlertEngine {
         transitions.add(AlertEvent(type: type, active: shouldBeActive, timestamp: snapshot.timestamp));
       }
       return transitions;
-    }).asBroadcastStream();
+    });
   }
 }
 

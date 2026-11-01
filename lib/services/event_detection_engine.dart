@@ -6,6 +6,7 @@ import '../models/telemetry_snapshot.dart';
 import 'alert_preferences.dart';
 import 'altitude_trend.dart';
 import 'gnss_quality.dart' show GnssQuality;
+import 'ref_counted_broadcast.dart';
 
 /// Fase 13's central "Event Detection Engine" (§6): the single place raw
 /// telemetry is turned into confirmed, objective [DetectedEvent]s —
@@ -167,9 +168,18 @@ class EventDetectionEngine {
   /// producing a rapid burst of rising/falling/rising events.
   static const Duration _altitudeCooldown = Duration(seconds: 10);
 
-  late final Stream<DetectedEvent> events = _buildStream();
+  /// Subscribed to the snapshot stream only while listened to — see
+  /// [RefCountedBroadcast] (Fase 16.2-R4.3-R2.6.8: this used to be a bare
+  /// `asBroadcastStream()`, which never released it).
+  late final RefCountedBroadcast<DetectedEvent> _events = RefCountedBroadcast<DetectedEvent>(_detectEvents);
 
-  Stream<DetectedEvent> _buildStream() {
+  late final Stream<DetectedEvent> events = _events.stream;
+
+  /// Ends [events] and releases the snapshot stream. Terminal.
+  void dispose() => _events.dispose();
+
+  /// One listening period's detector — fresh tracker state.
+  Stream<DetectedEvent> _detectEvents() {
     final acceleration = LevelEventTracker(exitRatio: _exitRatio, minDuration: _accelerationMinDuration, cooldown: _levelCooldown);
     final braking = LevelEventTracker(exitRatio: _exitRatio, minDuration: _brakingMinDuration, cooldown: _levelCooldown);
     final corneringRight = LevelEventTracker(exitRatio: _exitRatio, minDuration: _corneringMinDuration, cooldown: _levelCooldown);
@@ -268,7 +278,7 @@ class EventDetectionEngine {
       }
 
       return results;
-    }).asBroadcastStream();
+    });
   }
 }
 

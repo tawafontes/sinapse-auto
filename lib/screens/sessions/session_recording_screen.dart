@@ -60,16 +60,34 @@ class _SessionRecordingScreenState extends State<SessionRecordingScreen> {
 
   void _startSession() {
     final dashcamController = widget.dashcamController;
-    if (dashcamController != null) {
-      dashcamController.startSession();
-    } else {
-      widget.recorder.startSession();
+    try {
+      if (dashcamController != null) {
+        dashcamController.startSession();
+      } else {
+        widget.recorder.startSession();
+      }
+    } on SessionAdmissionRejected {
+      // Fase 16.2-R4.3-R2.6.4: expected only if this button was rendered a
+      // moment before a session started finalizing; nothing was touched, and
+      // the recorder's own notification rebuilds this screen.
     }
   }
 
-  Future<void> _stopSession() {
+  /// Also the RETRY (Fase 16.2-R4.3-R2.6.4): while the recorder reports
+  /// [DrivingSessionRecorderState.finalizationFailed], stopping again repeats
+  /// only the persistence that is still missing for the same session — offered
+  /// only once the controller says a stop would do that (Fase 16.2-R4.4-R1.2,
+  /// see `build`).
+  void _stopSession() {
     final dashcamController = widget.dashcamController;
-    return dashcamController != null ? dashcamController.stopSession() : widget.recorder.stopSession();
+    final stop = dashcamController != null ? dashcamController.stopSession() : widget.recorder.stopSession();
+    unawaited(
+      stop.catchError((Object error) {
+        // A persistence failure is kept by the recorder and shown below, with a
+        // retry; anything else is not expected here and must still surface.
+        if (widget.recorder.state != DrivingSessionRecorderState.finalizationFailed) throw error;
+      }),
+    );
   }
 
   String _formatDuration(Duration d) {
@@ -82,6 +100,15 @@ class _SessionRecordingScreenState extends State<SessionRecordingScreen> {
   @override
   Widget build(BuildContext context) {
     final session = widget.recorder.activeSession;
+    final recorderState = widget.recorder.state;
+    // Fase 16.2-R4.4-R1.2 (X66-screen): the recorder reports its failure while
+    // the session's STOP request may still be finishing (camera, telemetry);
+    // a stop requested then joins that request and retries nothing. The retry is
+    // executable only once the controller says a stop would retry — it notifies
+    // when that changes.
+    final dashcamController = widget.dashcamController;
+    final retryWaiting =
+        recorderState == DrivingSessionRecorderState.finalizationFailed && dashcamController != null && !dashcamController.canRetrySessionFinalization;
     final colorScheme = Theme.of(context).colorScheme;
     final prefs = UnitPreferencesScope.of(context);
 
@@ -114,7 +141,8 @@ class _SessionRecordingScreenState extends State<SessionRecordingScreen> {
                   : Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Text(_formatDuration(DateTime.now().difference(session.startTime)), style: const TextStyle(fontSize: 48, fontWeight: FontWeight.bold)),
+                        // An ended session (being finalized) no longer grows.
+                        Text(_formatDuration((session.endTime ?? DateTime.now()).difference(session.startTime)), style: const TextStyle(fontSize: 48, fontWeight: FontWeight.bold)),
                         const SizedBox(height: 24),
                         _StatRow(
                           label: 'Velocidade atual',
@@ -158,12 +186,41 @@ class _SessionRecordingScreenState extends State<SessionRecordingScreen> {
                             label: 'Dashcam',
                             value: dashcamStatusLabel(widget.dashcamController!.status),
                           ),
+                        // Fase 16.2-R4.3-R2.6.10: the video keeps recording, but the
+                        // telemetry file failed and nothing more is being saved to it.
+                        if (widget.dashcamController?.telemetryFailureMessage case final telemetryFailure?)
+                          Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 6),
+                            child: Text(telemetryFailure, textAlign: TextAlign.center, style: TextStyle(color: colorScheme.error)),
+                          ),
+                        // Fase 16.2-R4.3-R2.6.4: a failed finalization is shown, with the retry.
+                        if (recorderState == DrivingSessionRecorderState.finalizationFailed) ...[
+                          const SizedBox(height: 16),
+                          Text(
+                            'Não foi possível salvar a sessão (${widget.recorder.lastFinalizationError}). '
+                            'Os dados continuam preservados; verifique o armazenamento e tente finalizar novamente.',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(color: colorScheme.error),
+                          ),
+                          if (retryWaiting) ...[
+                            const SizedBox(height: 8),
+                            const Text(
+                              'A tentativa anterior ainda está terminando (câmera e telemetria). '
+                              'A nova tentativa fica disponível assim que ela terminar.',
+                              textAlign: TextAlign.center,
+                            ),
+                          ],
+                        ],
                         const SizedBox(height: 24),
                         FilledButton.icon(
                           style: FilledButton.styleFrom(backgroundColor: colorScheme.error),
-                          onPressed: _stopSession,
+                          onPressed: recorderState == DrivingSessionRecorderState.finalizing || retryWaiting ? null : _stopSession,
                           icon: const Icon(Icons.stop),
-                          label: const Text('Finalizar sessão'),
+                          label: Text(switch (recorderState) {
+                            DrivingSessionRecorderState.finalizing => 'Finalizando…',
+                            DrivingSessionRecorderState.finalizationFailed => 'Tentar finalizar novamente',
+                            _ => 'Finalizar sessão',
+                          }),
                         ),
                       ],
                     ),

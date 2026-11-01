@@ -18,11 +18,32 @@ enum DashcamStatus {
   /// Actively loop-recording during an active driving session.
   recording,
 
+  /// A driving session wants Dashcam recording, but the camera is currently
+  /// known to be unavailable (backgrounded and revoked by Android, or a
+  /// native start/stop call timed out — see `DashcamService.cameraKnownUnavailable`'s
+  /// own doc) and no recovery attempt is in flight yet. Distinct from
+  /// [error]: this is an expected, self-recovering condition, not a failure
+  /// requiring the user's "Tentar novamente" action, and distinct from
+  /// [recording]: no video is actually being captured right now, however
+  /// briefly. Added in Fase 16.2-R1 after an independent review demonstrated
+  /// that, without it, `DashcamSessionController.status` could report
+  /// [recording] while the camera was known-unavailable — a real, testable
+  /// "false REC" gap (see that method's own doc).
+  cameraUnavailable,
+
   /// The camera failed (init error, permission denied, storage full,
   /// hardware taken by another app, ...) — see the controller's own
   /// `errorMessage`. The driving session itself is unaffected (Fase 15's
   /// failure-isolation requirement).
   error,
+
+  /// Fase 16.2-R4.3-R2.6.10: a session was stopped and its camera already
+  /// released, but its telemetry file is still being finalized (the last
+  /// samples written, the file closed) — e.g. a slow or hung disk. Not
+  /// [idle]: that session is not finished yet, and a telemetry failure found
+  /// while finishing it still turns this into [error]. A new session may start
+  /// meanwhile (it uses its own file and the released camera).
+  finalizing,
 }
 
 String dashcamStatusLabel(DashcamStatus status) {
@@ -35,7 +56,11 @@ String dashcamStatusLabel(DashcamStatus status) {
       return 'Iniciando…';
     case DashcamStatus.recording:
       return 'Gravando';
+    case DashcamStatus.cameraUnavailable:
+      return 'Câmera indisponível';
     case DashcamStatus.error:
       return 'Erro';
+    case DashcamStatus.finalizing:
+      return 'Finalizando…';
   }
 }

@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 
-import '../../services/app_settings.dart';
+import '../../services/configuration_reset_service.dart';
 import '../../services/dashboard_sensor_streams.dart';
 import '../../services/dashcam_session_controller.dart';
+import '../../services/driving_session_host.dart';
 import '../../services/driving_session_recorder.dart';
-import '../../services/sensor_widget_repository.dart';
 import '../../services/theme_controller.dart';
 import '../hud/hud_screen.dart';
 import '../onboarding/theme_selection_screen.dart';
@@ -24,11 +24,11 @@ import 'units_screen.dart';
 /// the dashboard itself now (the "+" button, and each tile's long-press
 /// menu) rather than here.
 ///
-/// [streams] is the Dashboard's own already-constructed
-/// [DashboardSensorStreams] instance, threaded through so [DiagnosticsScreen]
-/// can reuse it; [sessionRecorder] is likewise the Dashboard's single
-/// [DrivingSessionRecorder] — this screen never constructs its own sensor
-/// connection or a second recorder.
+/// [streams] is the app's single [DashboardSensorStreams] instance (owned by
+/// `DrivingSessionHost`, threaded through by the Dashboard) so
+/// [DiagnosticsScreen] can reuse it; [sessionRecorder] is likewise the app's
+/// single [DrivingSessionRecorder] — this screen never constructs its own
+/// sensor connection or a second recorder.
 class SettingsMenuScreen extends StatelessWidget {
   const SettingsMenuScreen({
     super.key,
@@ -40,16 +40,24 @@ class SettingsMenuScreen extends StatelessWidget {
   final DashboardSensorStreams streams;
   final DrivingSessionRecorder sessionRecorder;
 
-  /// Nullable only for the brief window before `DashboardScreen`'s own
-  /// `didChangeDependencies` first constructs it (mirrors how
-  /// `sessionRecorder` itself would be nullable if this screen could be
-  /// reached before `initState`, which it can't) — its
-  /// `DashcamSessionController.status` getter already reports
-  /// `DashcamStatus.disabled` on its own whenever the feature is turned
-  /// off, so `null` here is never used to mean "disabled".
+  /// Nullable so callers that only have a recorder keep compiling; the
+  /// Dashboard always passes the app's controller (owned by
+  /// `DrivingSessionHost`). Its `DashcamSessionController.status` getter
+  /// already reports `DashcamStatus.disabled` on its own whenever the feature
+  /// is turned off, so `null` here is never used to mean "disabled".
   final DashcamSessionController? dashcamController;
 
+  /// Fase 16.2-R4.3-R2.6.8: a reset never ends a driving session. While the
+  /// session still has an open obligation this explains what to do first
+  /// instead of offering the reset — and [ConfigurationResetService] refuses
+  /// on its own too, so this dialog is not the only guard.
   Future<void> _confirmReset(BuildContext context) async {
+    final sessionHost = DrivingSessionScope.of(context);
+    final blocker = sessionHost.configurationResetBlocker;
+    if (blocker != null) {
+      await _explainResetBlocked(context, blocker);
+      return;
+    }
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -74,13 +82,43 @@ class SettingsMenuScreen extends StatelessWidget {
     if (!context.mounted) return;
 
     final themeController = ThemeControllerScope.of(context);
-    await AppSettings.setDashboardPageCount(1);
-    await SensorWidgetRepository.removeSensorsNotIn(const {});
-    await themeController.resetToDefaults();
+    try {
+      await const ConfigurationResetService().reset(sessionHost: sessionHost, themeController: themeController);
+    } on ConfigurationResetRejected catch (rejected) {
+      if (context.mounted) await _explainResetBlocked(context, rejected.blocker);
+      return;
+    }
     if (!context.mounted) return;
     Navigator.of(context).pushAndRemoveUntil(
       MaterialPageRoute(builder: (_) => const WelcomeScreen()),
       (route) => false,
+    );
+  }
+
+  Future<void> _explainResetBlocked(BuildContext context, DrivingSessionRecorderState blocker) {
+    final message = switch (blocker) {
+      DrivingSessionRecorderState.finalizing =>
+        'A sessão de condução ainda está sendo finalizada. Aguarde a finalização terminar e depois '
+            'redefina a configuração.',
+      DrivingSessionRecorderState.finalizationFailed =>
+        'A última sessão de condução ainda não foi salva. Tente finalizá-la primeiro em '
+            '"Sessão de condução" → "Tentar finalizar novamente" e depois redefina a configuração.',
+      _ =>
+        'Há uma sessão de condução em andamento. Encerre a sessão primeiro em "Sessão de condução" → '
+            '"Finalizar sessão" e depois redefina a configuração.',
+    };
+    return showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Não é possível redefinir agora'),
+        content: Text(message),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Entendi'),
+          ),
+        ],
+      ),
     );
   }
 

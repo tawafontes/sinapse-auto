@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import '../../models/display_style_metadata.dart';
 import '../../models/sensor_type_metadata.dart';
 import '../../models/sensor_widget_config.dart';
-import '../../services/power_profile_preferences.dart';
 import '../../services/sensor_widget_repository.dart';
 import '../dashboard/dashboard_screen.dart';
 import 'style_preview_widgets.dart';
@@ -106,10 +105,9 @@ class _StyleSelectionScreenState extends State<StyleSelectionScreen> {
     }
     if (!mounted) return;
     if (widget.isEditMode) {
-      final powerProfile = PowerProfilePreferencesScope.of(context);
       Navigator.of(context).pushAndRemoveUntil(
         MaterialPageRoute(
-          builder: (_) => DashboardScreen(preferredPage: widget.preferredPage, powerProfile: powerProfile),
+          builder: (_) => DashboardScreen(preferredPage: widget.preferredPage),
         ),
         (route) => false,
       );

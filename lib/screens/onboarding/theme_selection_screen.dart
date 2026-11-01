@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import '../../models/color_palette_metadata.dart';
 import '../../models/font_family_metadata.dart';
 import '../../models/theme_config.dart';
-import '../../services/power_profile_preferences.dart';
 import '../../services/theme_controller.dart';
 import '../dashboard/dashboard_screen.dart';
 
@@ -31,12 +30,11 @@ class _ThemeSelectionScreenState extends State<ThemeSelectionScreen> {
 
   Future<void> _finish(BuildContext context) async {
     final controller = ThemeControllerScope.of(context);
-    final powerProfile = PowerProfilePreferencesScope.of(context);
     await controller.commit();
     _confirmed = true;
     if (!context.mounted) return;
     Navigator.of(context).pushAndRemoveUntil(
-      MaterialPageRoute(builder: (_) => DashboardScreen(powerProfile: powerProfile)),
+      MaterialPageRoute(builder: (_) => const DashboardScreen()),
       (route) => false,
     );
   }
