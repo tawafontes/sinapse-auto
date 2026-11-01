@@ -1,0 +1,3 @@
+# build.sh compares these files byte for byte (SHA256SUMS): keep LF on every platform.
+* text=auto eol=lf
+*.aar binary

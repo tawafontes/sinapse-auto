@@ -1,0 +1,95 @@
+R4.3-R2.6.22-F2: reuse the persistent input surface across video encoders
+
+EncoderImpl.SurfaceInput parks its persistent input surface after MediaCodec.release() instead of
+releasing it, and the next video encoder takes a parked surface before creating a new one. On
+Android 13 (Codec2) this frees the C2OMXNode (and its 20 ms polling thread) that a codec released
+while only configured leaves behind: re-associating the same persistent surface with another codec
+replaces the GraphicBufferSource component that kept the old node alive. Validated on SM-A326B in
+the R2.6.22-F2 harness; see ../PATCHES.md.
+
+Base:   androidx.camera:camera-video:1.6.2, EncoderImpl.java sha256
+        fc9054b2cf4282bc9ab538d0a82c566d9103dec69bff153ad249ea5d57f755c7
+        (= camera-video-1.6.2-sources.jar entry = platform/frameworks/support
+        @ 9046f07948c1e7a89aaec581463730f4d666611b,
+        camera/camera-video/src/main/java/androidx/camera/video/internal/encoder/EncoderImpl.java)
+Result: sha256 3f969cef506d6bfd79ebafb27d935aac24488c14de268604c60072d33f0aa6ae
+Apply:  patch -p1 -d <directory that contains androidx/>  (build.sh does this)
+
+--- a/androidx/camera/video/internal/encoder/EncoderImpl.java
++++ b/androidx/camera/video/internal/encoder/EncoderImpl.java
+@@ -159,6 +159,24 @@
+     private static final long STOP_TIMEOUT_MS = 1000L;
+     private static final long SIGNAL_EOS_TIMEOUT_MS = 1000L;
+ 
++    // R2.6.22-F2: persistent input surfaces whose codec has been released, kept for the next
++    // video encoder instead of being released.
++    //
++    // On Android 13 (Codec2 CCodec) setInputSurface() connects a C2OMXNode, which the surface's
++    // GraphicBufferSource keeps as its component. CCodec disconnects it only when the codec is
++    // stopped, or released while STARTING/RUNNING/STOPPING. A codec released while it is only
++    // configured (bound and never recorded, an aborted START, the reset() that follows every
++    // STOP) therefore leaves the node and its 20 ms polling thread referenced by the source for
++    // the rest of the process. Associating the same persistent surface with another codec
++    // replaces that component and frees the node; reusing a persistent surface for one codec at
++    // a time is what createPersistentInputSurface() is for.
++    //
++    // A surface is created only when none is parked, so the number of surfaces, parked ones
++    // included, never exceeds the peak number of video encoders alive at the same time.
++    private static final Object sParkedInputSurfacesLock = new Object();
++    @GuardedBy("sParkedInputSurfacesLock")
++    private static final Deque<Surface> sParkedInputSurfaces = new ArrayDeque<>();
++
+     @SuppressWarnings("WeakerAccess") // synthetic accessor
+     final String mTag;
+     @SuppressWarnings("WeakerAccess") // synthetic accessor
+@@ -1652,20 +1670,49 @@
+                 surface = mSurface;
+                 mSurface = null;
+             }
+-            if (surface != null) {
++            if (surface == null) {
++                return;
++            }
++            // releaseInternal() has already released the codec, so no codec uses the surface.
++            if (!surface.isValid()) {
+                 surface.release();
++                return;
++            }
++            int parked;
++            synchronized (sParkedInputSurfacesLock) {
++                sParkedInputSurfaces.addLast(surface);
++                parked = sParkedInputSurfaces.size();
+             }
++            Logger.d(mTag, "R2.6.22-F2 parked input surface " + surface + ", parked=" + parked);
+         }
+ 
+         @Override
+         public @NonNull Surface getSurface() {
+             synchronized (mLock) {
+                 if (mSurface == null) {
++                    mSurface = takeParkedSurface();
++                }
++                if (mSurface == null) {
+                     mSurface = MediaCodec.createPersistentInputSurface();
+                 }
+                 return mSurface;
+             }
+         }
++
++        private @Nullable Surface takeParkedSurface() {
++            synchronized (sParkedInputSurfacesLock) {
++                Surface surface;
++                while ((surface = sParkedInputSurfaces.pollFirst()) != null) {
++                    if (surface.isValid()) {
++                        Logger.d(mTag, "R2.6.22-F2 reusing parked input surface " + surface
++                                + ", parked=" + sParkedInputSurfaces.size());
++                        return surface;
++                    }
++                    surface.release();
++                }
++            }
++            return null;
++        }
+     }
+ 
+     @SuppressWarnings("WeakerAccess") // synthetic accessor

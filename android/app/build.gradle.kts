@@ -43,3 +43,30 @@ kotlin {
 flutter {
     source = "../.."
 }
+
+// R4.3-R2.6.22-INT: androidx.camera:camera-video 1.6.2 is replaced by the same release plus the
+// F2 patch, rebuilt from the official sources by third_party/androidx_camera_video_f2/build.sh.
+// On Android 13 a video codec released while only configured leaves its C2OMXNode thread alive
+// for the rest of the process (one per segment rotation, session STOP, HOME/return, aborted
+// START); F2 makes EncoderImpl hand its persistent input surface to the next video encoder, which
+// frees that node. Only this module and only at exactly 1.6.2: the camera plugin and every other
+// CameraX module stay upstream. Provenance, verification and removal: that folder's README.md.
+repositories {
+    exclusiveContent {
+        forRepository {
+            maven {
+                name = "cameraVideoF2"
+                url = uri(rootProject.file("../third_party/androidx_camera_video_f2/maven"))
+            }
+        }
+        filter { includeModule("com.synapseauto.thirdparty.androidx.camera", "camera-video") }
+    }
+}
+
+configurations.configureEach {
+    resolutionStrategy.dependencySubstitution {
+        substitute(module("androidx.camera:camera-video:1.6.2"))
+            .using(module("com.synapseauto.thirdparty.androidx.camera:camera-video:1.6.2-synapse-f2"))
+            .because("R4.3-R2.6.22-INT: camera-video 1.6.2 + F2 (third_party/androidx_camera_video_f2)")
+    }
+}
