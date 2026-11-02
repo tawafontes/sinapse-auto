@@ -80,7 +80,15 @@ class _Rig {
 
   /// Each notification of the controller: the status AT that instant, the
   /// recorder's session and whether the camera was recording.
+  /// Only notifications that say "gravando" or leave the recording status: a neutral segment
+  /// presentation claims no recording. A projection of [allNotifications], for the tests about what
+  /// is claimed; a missing neutralization or a duplicate one shows only in [allNotifications].
   final notified = <({DashcamStatus status, String? session, bool camera})>[];
+
+  /// Fase 16.2-R4.4-HW-MIG-5-SIG-2.1: every notification, unfiltered. [stops] is how many native
+  /// STOPs had been called by then, so an order against the STOP can be asserted.
+  final allNotifications = <({DashcamStatus status, DashcamSegmentPresentation presentation, bool camera, int stops})>[];
+  List<DashcamSegmentPresentation> presentationsSince(int mark) => allNotifications.skip(mark).map((n) => n.presentation).toList();
 
   int count(String call) => platform.calls.where((c) => c == call).length;
   bool get cameraRecording => service.previewController?.value.isRecordingVideo ?? false;
@@ -153,7 +161,11 @@ class _Rig {
       snapshotStream: snapshots.stream,
       eventStream: events.stream,
     );
-    controller.addListener(() => notified.add((status: controller.status, session: recorder.activeSession?.id, camera: cameraRecording)));
+    controller.addListener(() {
+      allNotifications.add((status: controller.status, presentation: controller.segmentPresentation, camera: cameraRecording, stops: count('stopVideoRecording')));
+      if (controller.status == DashcamStatus.recording && controller.segmentPresentation != DashcamSegmentPresentation.videoConfirmed) return;
+      notified.add((status: controller.status, session: recorder.activeSession?.id, camera: cameraRecording));
+    });
     controller.startSession();
     await until(() => controller.status == DashcamStatus.recording && cameraRecording, 'the session recording');
   }
@@ -246,9 +258,13 @@ _Shown _shown(WidgetTester tester) {
       ? 'unavailable'
       : inPreview(find.text('Tentar novamente'))
       ? 'error'
+      : inPreview(find.textContaining('Iniciando segmento…'))
+      ? 'neutral Iniciando segmento…'
+      : inPreview(find.textContaining('Trocando segmento…'))
+      ? 'neutral Trocando segmento…'
       : 'other';
   var session = 'none';
-  for (final label in ['Gravando', 'Câmera indisponível', 'Erro', 'Pronto', 'Iniciando…', 'Finalizando…']) {
+  for (final label in ['Gravando', 'Câmera indisponível', 'Erro', 'Pronto', 'Iniciando…', 'Finalizando…', 'Iniciando segmento…', 'Trocando segmento…']) {
     if (find.descendant(of: find.byKey(_sessionKey), matching: find.text(label)).evaluate().isNotEmpty) session = label;
   }
   return (rec: rec, preview: preview, session: session);
@@ -786,9 +802,13 @@ void main() {
   );
 
   testWidgets(
-    'X410 — characterization of the window BEFORE the deadline (historical contract, unchanged by this round): while the '
-    'restart START is in flight and within its deadline the status still says "gravando", REC is drawn and nothing is '
-    'notified; a restart that returns in time notifies nothing either',
+    // Fase 16.2-R4.4-HW-MIG-5-SIG-2: this test used to pin REC being drawn in this window, the
+    // defect that round removes by owner decision. The status part of the contract is unchanged.
+    // SIG-2.1 (AUD-02): "no notification at all in the window" became the exact sequence, read from
+    // the unfiltered log, and the exact labels of all three, not only "is not REC".
+    'X410 — the window BEFORE the deadline: while the restart START is in flight and within its deadline the status still '
+    'says "recording" but nothing claims a recording: all three show the neutral label, the neutralization was notified '
+    'once and before the native STOP was called, and a restart that returns in time notifies "gravando" once',
     (tester) async {
       final rig = _Rig();
       await tester.runAsync(() => rig.start());
@@ -796,20 +816,32 @@ void main() {
         await _mount(tester, rig);
         late Completer<void> gate;
         late int mark;
+        late int allMark;
+        final stopsBefore = rig.count('stopVideoRecording');
         await tester.runAsync(() async {
           mark = rig.notified.length;
+          allMark = rig.allNotifications.length;
           gate = await rig.rotateAndHoldTheRestart();
           await Future<void>.delayed(const Duration(milliseconds: 300));
         });
         expect(rig.cameraRecording, isFalse, reason: 'nothing is being recorded while the restart START is in flight');
         expect(rig.controller.status, DashcamStatus.recording, reason: 'and the status says recording: the pre-deadline contract');
-        expect(rig.statusesNotifiedSince(mark), isEmpty);
-        _expectRecordingShown(await _afterANotificationOnlyFrame(tester), 'within the deadline');
+        expect(rig.statusesNotifiedSince(mark), isEmpty, reason: 'no premature "gravando"');
+        expect(rig.presentationsSince(allMark), [DashcamSegmentPresentation.transitioning, DashcamSegmentPresentation.startPending], reason: 'neutralized once, entered the transition once, no duplicates');
+        final neutralized = rig.allNotifications[allMark];
+        expect(neutralized.stops, stopsBefore, reason: 'not delayed: told before the native STOP was even called');
+        expect(neutralized.camera, isTrue, reason: 'while that camera was still recording');
+        final within = await _afterANotificationOnlyFrame(tester);
+        expect(within.rec, startsWith('other Iniciando segmento'), reason: 'REC indicator within the deadline');
+        expect(within.preview, 'neutral Iniciando segmento…', reason: 'preview within the deadline');
+        expect(within.session, 'Iniciando segmento…', reason: 'session screen within the deadline');
         await tester.runAsync(() async {
           gate.complete();
           await rig.until(() => rig.cameraRecording && rig.service.queuedRotationCountForTest == 0, 'the restart returning in time');
         });
-        expect(rig.statusesNotifiedSince(mark), isEmpty, reason: 'a rotation that met its deadline notifies nothing');
+        expect(rig.statusesNotifiedSince(mark), [DashcamStatus.recording], reason: 'once, for the evidence of the new segment');
+        expect(rig.presentationsSince(allMark), [DashcamSegmentPresentation.transitioning, DashcamSegmentPresentation.startPending, DashcamSegmentPresentation.videoConfirmed], reason: 'the transition ends');
+        _expectRecordingShown(await _afterANotificationOnlyFrame(tester), 'with the new segment confirmed');
       } finally {
         await tester.pumpWidget(const SizedBox.shrink());
         await tester.runAsync(rig.close);
@@ -819,25 +851,108 @@ void main() {
   );
 
   testWidgets(
-    'X411 — ordinary rotations notify nothing (no notification per segment): three rotations in a row, zero '
-    'notifications, and REC keeps counting on its own ticker',
+    // Fase 16.2-R4.4-HW-MIG-5-SIG-2: this test used to pin zero notifications per segment. REC now
+    // changes at each rotation, so what stays bounded is one "gravando" per segment, none per frame.
+    // SIG-2.1 (AUD-02): each rotation is observed at its gates and in frames, on the unfiltered log,
+    // with video held back by the test, so that premature red and a missing exit both show.
+    'X411 — ordinary rotations: at each of three, a frame with the STOP held and one with the START held are neutral, a '
+    'Start without video stays neutral, and only its progress turns all three red: exactly three presentations notified '
+    'per rotation, no duplicates, and REC keeps counting on its own ticker',
     (tester) async {
       final rig = _Rig();
       await tester.runAsync(() => rig.start());
       try {
         await _mount(tester, rig);
-        late int mark;
-        await tester.runAsync(() async {
-          mark = rig.notified.length;
-          for (var i = 0; i < 3; i++) {
-            final startsBefore = rig.count('startVideoCapturing');
+        rig.platform.autoVideoEvidence = false;
+        final mark = rig.notified.length;
+        for (var i = 0; i < 3; i++) {
+          final allMark = rig.allNotifications.length;
+          final startsBefore = rig.count('startVideoCapturing');
+          final stopsBefore = rig.count('stopVideoRecording');
+          final stop = Completer<void>();
+          final start = Completer<void>();
+          rig.held.addAll([stop, start]);
+          rig.platform.pendingStopVideoRecording = stop;
+          await tester.runAsync(() async {
             rig.ticks.last();
-            await rig.until(() => rig.count('startVideoCapturing') == startsBefore + 1 && rig.cameraRecording && rig.service.queuedRotationCountForTest == 0, 'rotation ${i + 1}');
-          }
-        });
-        expect(rig.statusesNotifiedSince(mark), isEmpty);
+            await rig.until(() => rig.count('stopVideoRecording') == stopsBefore + 1, 'the STOP of rotation ${i + 1}');
+          });
+          var shown = await _afterANotificationOnlyFrame(tester);
+          expect(shown.rec, startsWith('other Trocando segmento'), reason: 'rotation ${i + 1} with the STOP held');
+          expect(shown.preview, 'neutral Trocando segmento…', reason: 'rotation ${i + 1} with the STOP held');
+          expect(shown.session, 'Trocando segmento…', reason: 'rotation ${i + 1} with the STOP held');
+
+          rig.platform.pendingStopVideoRecording = null;
+          rig.platform.pendingStartVideoCapturing = start;
+          await tester.runAsync(() async {
+            stop.complete();
+            await rig.until(() => rig.count('startVideoCapturing') == startsBefore + 1, 'the START of rotation ${i + 1}');
+          });
+          rig.platform.pendingStartVideoCapturing = null;
+          shown = await _afterANotificationOnlyFrame(tester);
+          expect(shown.rec, startsWith('other Iniciando segmento'), reason: 'rotation ${i + 1} with the START held');
+          expect(shown.preview, 'neutral Iniciando segmento…', reason: 'rotation ${i + 1} with the START held');
+          expect(shown.session, 'Iniciando segmento…', reason: 'rotation ${i + 1} with the START held');
+
+          await tester.runAsync(() async {
+            start.complete();
+            await rig.until(() => rig.cameraRecording && rig.service.queuedRotationCountForTest == 0, 'rotation ${i + 1} settling');
+          });
+          shown = await _afterANotificationOnlyFrame(tester);
+          expect(shown.rec, startsWith('other Iniciando segmento'), reason: 'rotation ${i + 1}: a Start alone is no video');
+          expect(rig.notified.length, mark + i, reason: 'rotation ${i + 1}: no premature "gravando"');
+
+          rig.platform.emitVideoProgress();
+          rig.platform.emitVideoProgress();
+          _expectRecordingShown(await _afterANotificationOnlyFrame(tester), 'rotation ${i + 1} with its video');
+          expect(rig.presentationsSince(allMark), [DashcamSegmentPresentation.transitioning, DashcamSegmentPresentation.startPending, DashcamSegmentPresentation.videoConfirmed], reason: 'rotation ${i + 1}');
+        }
+        expect(rig.statusesNotifiedSince(mark), List.filled(3, DashcamStatus.recording));
         await tester.pump(const Duration(seconds: 1));
         _expectRecordingShown(_shown(tester), 'after three rotations');
+      } finally {
+        await tester.pumpWidget(const SizedBox.shrink());
+        await tester.runAsync(rig.close);
+      }
+    },
+    timeout: const Timeout(Duration(seconds: 90)),
+  );
+
+  testWidgets(
+    // Fase 16.2-R4.4-HW-MIG-5-SIG-2.1 (AUD-02): with the native STOP held the status still says
+    // `recording`, so the controller's own gate lets a notification through and only the service's
+    // withdrawal stands in the way. The slot is written directly: the fake's emit* ignore an ended
+    // recording, and after the STOP returned they would prove nothing.
+    'X584 — obsolete callbacks notify nothing: with a manual STOP in flight, a tick and a change of the evidence slot '
+    'publish no presentation, and neutral stays neutral',
+    (tester) async {
+      final rig = _Rig();
+      await tester.runAsync(() => rig.start());
+      try {
+        await _mount(tester, rig);
+        final obsoleteTick = rig.ticks.last;
+        final stop = Completer<void>();
+        rig.held.add(stop);
+        rig.platform.pendingStopVideoRecording = stop;
+        late Future<void> stopping;
+        await tester.runAsync(() async {
+          stopping = rig.controller.stopSession();
+          await rig.until(() => rig.count('stopVideoRecording') == 1, 'the native STOP');
+        });
+        expect(rig.controller.status, DashcamStatus.recording, reason: 'the window this test is about');
+        final mark = rig.allNotifications.length;
+        await tester.runAsync(() async {
+          obsoleteTick();
+          await pumpEventQueue();
+        });
+        rig.platform.moveEvidenceToAnotherRecording();
+        rig.platform.clearRecordingEvidence();
+        expect(rig.presentationsSince(mark), isEmpty);
+        expect(rig.service.segmentPresentationListenable.value, DashcamSegmentPresentation.inactive);
+        await tester.runAsync(() async {
+          stop.complete();
+          await stopping;
+        });
       } finally {
         await tester.pumpWidget(const SizedBox.shrink());
         await tester.runAsync(rig.close);

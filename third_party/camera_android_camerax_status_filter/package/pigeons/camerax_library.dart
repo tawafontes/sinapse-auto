@@ -455,11 +455,20 @@ abstract class Recorder implements VideoOutput {
 }
 
 /// Listens for `VideoRecordEvent`s from a `PendingRecording`.
+///
+/// Synapse Auto (R4.4-HW-MIG-5-SIG-2.1): one per physical recording. Its identity reaches
+/// native with this object, before `PendingRecording.start`, and every evidence message of
+/// the recording carries it back.
 @ProxyApi()
 abstract class VideoRecordEventListener {
-  VideoRecordEventListener();
+  VideoRecordEventListener(int recordingIdentity);
 
   late void Function(VideoRecordEvent event) onEvent;
+
+  /// Synapse Auto (R4.4-HW-MIG-5-SIG-2.3): a value no other recording of this process had or will
+  /// have, from a counter that outlives a Dart isolate.
+  @static
+  int allocateRecordingIdentity();
 }
 
 /// A recording that can be started at a future time.

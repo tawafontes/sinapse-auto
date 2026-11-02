@@ -83,6 +83,10 @@ class _StatusBar extends StatelessWidget {
   Widget build(BuildContext context) {
     final startedAt = controller.recordingStartedAt;
     final elapsed = startedAt == null ? null : DateTime.now().difference(startedAt);
+    // Fase 16.2-R4.4-HW-MIG-5-SIG-2: only this bar changes; the preview above it
+    // stays mounted through a rotation.
+    final confirmed = controller.segmentPresentation == DashcamSegmentPresentation.videoConfirmed;
+    final label = confirmed ? 'REC' : controller.statusLabel;
 
     return DecoratedBox(
       decoration: const BoxDecoration(color: Colors.black54),
@@ -90,10 +94,10 @@ class _StatusBar extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         child: Row(
           children: [
-            const Icon(Icons.fiber_manual_record, color: Colors.redAccent, size: 14),
+            confirmed ? const Icon(Icons.fiber_manual_record, color: Colors.redAccent, size: 14) : const Icon(Icons.videocam_outlined, color: Colors.white70, size: 14),
             const SizedBox(width: 6),
             Text(
-              elapsed == null ? 'REC' : 'REC · ${formatElapsed(elapsed)}',
+              elapsed == null ? label : '$label · ${formatElapsed(elapsed)}',
               style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
             ),
             const Spacer(),

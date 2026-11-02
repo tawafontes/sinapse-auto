@@ -1,0 +1,7 @@
+name: synapse_pigeon_repro
+description: Pins the generator of camerax_library.g.dart and CameraXLibrary.g.kt. See ../../README.md.
+publish_to: none
+environment:
+  sdk: ^3.11.0
+dev_dependencies:
+  pigeon: 27.3.2

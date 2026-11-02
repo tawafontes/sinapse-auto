@@ -3,10 +3,12 @@ import 'dart:io';
 import 'dart:math' show Random, max;
 
 import 'package:camera/camera.dart';
+import 'package:camera_android_camerax/camera_android_camerax.dart' show RecordingEvidence, currentRecordingEvidenceSource;
 import 'package:flutter/foundation.dart' show ValueListenable, ValueNotifier, visibleForTesting;
 
 import '../models/dashcam_clip_descriptor.dart';
 import '../models/dashcam_config.dart';
+import '../models/dashcam_status.dart';
 import 'dashcam_clip_files.dart';
 
 /// A single recorded loop-recording segment on disk.
@@ -1467,7 +1469,16 @@ class DashcamService {
   /// it onto the [DashcamServiceError] it emits.
   int? _currentControllerGeneration;
   Timer? _segmentTimer;
-  bool _isRecording = false;
+  /// Fase 16.2-R4.4-HW-MIG-5-SIG-2: every write of `false` also withdraws the
+  /// segment's video evidence, in the same step — a stop neutralizes REC before
+  /// its native call, never at its `Finalize`.
+  bool get _isRecording => _isRecordingValue;
+  set _isRecording(bool value) {
+    _isRecordingValue = value;
+    if (!value) _withdrawSegmentEvidence(DashcamSegmentPresentation.inactive);
+  }
+
+  bool _isRecordingValue = false;
   DateTime? _segmentStartedAt;
   bool _protectNextFinalizedClip = false;
   bool _lastKnownHasError = false;
@@ -1534,6 +1545,9 @@ class DashcamService {
   bool get _cameraKnownUnavailable => _cameraKnownUnavailableValue;
   set _cameraKnownUnavailable(bool value) {
     _cameraKnownUnavailableValue = value;
+    // Fase 16.2-R4.4-HW-MIG-5-SIG-2: a return from the background needs a new
+    // START and new evidence.
+    if (value) _withdrawSegmentEvidence(DashcamSegmentPresentation.inactive);
     _publishCameraKnownUnavailable();
   }
 
@@ -1757,6 +1771,65 @@ class DashcamService {
   List<DashcamClip> get clips => List.unmodifiable(_clips);
 
   bool get isRecording => _isRecording;
+
+  /// Fase 16.2-R4.4-HW-MIG-5-SIG-2: what REC may claim about the current
+  /// segment, published in the same step as the write that changes it. Only
+  /// presentation: nothing in the recording path reads it, waits for it or is
+  /// started by it, and no timer writes it — no evidence means no REC.
+  ValueListenable<DashcamSegmentPresentation> get segmentPresentationListenable => _segmentPresentation;
+  final ValueNotifier<DashcamSegmentPresentation> _segmentPresentation = ValueNotifier<DashcamSegmentPresentation>(DashcamSegmentPresentation.inactive);
+
+  /// The evidence slot being watched and the recording this service adopted in
+  /// it. `null` when no recording of this service may turn REC on — a Recording
+  /// identified only so it can be cleaned up is never adopted.
+  ValueListenable<RecordingEvidence?>? _adoptedEvidenceSlot;
+  int? _adoptedEvidenceToken;
+
+  /// Called only where a START's Recording was accepted as the run's segment
+  /// (never for one that is about to be stopped). The START's Future has
+  /// returned, and this service's own queue ([_enqueue]) runs no other START
+  /// before this adoption, so the slot holds this Recording's evidence — including
+  /// any that arrived before this call.
+  void _adoptSegmentEvidence() {
+    _releaseEvidenceSlot();
+    final slot = currentRecordingEvidenceSource()?.recordingEvidence;
+    final evidence = slot?.value;
+    if (slot == null || evidence == null) return;
+    _adoptedEvidenceSlot = slot;
+    _adoptedEvidenceToken = evidence.token;
+    slot.addListener(_onAdoptedEvidenceChanged);
+    _onAdoptedEvidenceChanged();
+  }
+
+  void _onAdoptedEvidenceChanged() {
+    final token = _adoptedEvidenceToken;
+    if (token == null) return;
+    final evidence = _adoptedEvidenceSlot?.value;
+    if (evidence == null || evidence.token != token) {
+      // The plugin let go of this Recording (its dispose). No fact to report.
+      _withdrawSegmentEvidence(DashcamSegmentPresentation.startPending);
+    } else if (evidence.ended) {
+      // A requested stop withdrew the adoption before asking, so an end that
+      // still finds it adopted was not requested (storage full, encoder error,
+      // source lost). Until the next STOP nothing else reads that Finalize.
+      // Only reported and shown: recovering from it is a separate decision.
+      _withdrawSegmentEvidence(DashcamSegmentPresentation.segmentEnded);
+      _reportError('A gravação do segmento terminou sem pedido de parada (erro nativo ${evidence.endError})', scope: DashcamServiceErrorScope.recordingResult);
+    } else if (evidence.videoProgress) {
+      _segmentPresentation.value = DashcamSegmentPresentation.videoConfirmed;
+    }
+  }
+
+  void _releaseEvidenceSlot() {
+    _adoptedEvidenceSlot?.removeListener(_onAdoptedEvidenceChanged);
+    _adoptedEvidenceSlot = null;
+    _adoptedEvidenceToken = null;
+  }
+
+  void _withdrawSegmentEvidence(DashcamSegmentPresentation next) {
+    _releaseEvidenceSlot();
+    _segmentPresentation.value = next;
+  }
 
   /// Marks the camera as no longer trustworthy for recording because the app
   /// has moved to the background — see [_cameraKnownUnavailable] for why.
@@ -3223,6 +3296,7 @@ class DashcamService {
 
     // Synchronous intent prefix — see this class's own doc, §1.
     _isRecording = true;
+    _withdrawSegmentEvidence(DashcamSegmentPresentation.startPending);
     // Fase 16.2-R4.3-R2.5: a new START intent — any stop intent created from
     // here on concerns the Recording THIS start produces, not one created
     // before it (see [_StopIntent.startEpoch]).
@@ -3595,6 +3669,7 @@ class DashcamService {
     final run = _RotationRun(startEpoch: _startIntentEpoch, controller: controller);
     _segmentTimer = Timer.periodic(segmentDuration, (_) => _onRotationTick(run));
     segmentTimerArmedHookForTest?.call(() => _onRotationTick(run));
+    _adoptSegmentEvidence();
   }
 
   /// Fase 16.2-R4.3-R2.6.15: an OPTIONAL test seam, called once each time a
@@ -4495,6 +4570,11 @@ class DashcamService {
     // same producer) regardless of anything that could touch the field in
     // between.
     final producerToken = _activeRecordingToken;
+    // Fase 16.2-R4.4-HW-MIG-5-SIG-2: past the guards above, so a stale or absorbed
+    // tick does not touch a healthy segment; before the STOP, not at its Finalize.
+    // Not for a tick that outlived a manual stop: its finalize finds nothing, and it
+    // must not say a rotation is going on.
+    if (_isRecording) _withdrawSegmentEvidence(DashcamSegmentPresentation.transitioning);
     final _PendingNativeStop? settled;
     try {
       settled = await _doFinalizeCurrentSegment(reason: _FinalizeReason.rotation, announceStop: announceStop);
@@ -4557,6 +4637,7 @@ class DashcamService {
     // kept a merely slow rotation from ever recording again — see
     // [_overdueRotationStop].)
     if (controller != null && _isRecording && !_cameraKnownUnavailable) {
+      _segmentPresentation.value = DashcamSegmentPresentation.startPending;
       _segmentStartedAt = DateTime.now();
       // Fase 16.2-R4.3-R2.6.20: whether this START outlived its response
       // deadline — set at the instant the deadline fires, read below once the
@@ -4633,7 +4714,13 @@ class DashcamService {
         _activeRecordingId = ++_nextRecordingId;
         _activeRecordingToken = producerToken;
       }
-      if (pastDeadline) await _settleLateRestart(run, controller);
+      if (pastDeadline) {
+        await _settleLateRestart(run, controller);
+      } else if (_lateRestartDecision(run, controller) == _LateRestartDecision.adopted) {
+        // Fase 16.2-R4.4-HW-MIG-5-SIG-2: the same conditions as a late one —
+        // a stop may have been requested while this START was in flight.
+        _adoptSegmentEvidence();
+      }
     }
   }
 
@@ -4687,6 +4774,7 @@ class DashcamService {
       _segmentTimer?.cancel();
       _segmentTimer = Timer.periodic(segmentDuration, (_) => _onRotationTick(run));
       segmentTimerArmedHookForTest?.call(() => _onRotationTick(run));
+      _adoptSegmentEvidence();
       return;
     }
     if (!identical(_controller, controller) || _hasQueuedStopFor(controller, _activeRecordingId, run.startEpoch)) return;

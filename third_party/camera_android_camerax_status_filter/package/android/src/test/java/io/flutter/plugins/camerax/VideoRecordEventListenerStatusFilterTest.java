@@ -16,6 +16,7 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import androidx.camera.video.RecordingStats;
 import androidx.camera.video.VideoRecordEvent;
 import io.flutter.plugin.common.BinaryMessenger;
 import java.util.ArrayList;
@@ -42,12 +43,15 @@ public class VideoRecordEventListenerStatusFilterTest {
               })
           .when(api)
           .onEvent(any(), any(), any());
-      listener = new VideoRecordEventListenerProxyApi.VideoRecordEventListenerImpl(api);
+      listener = new VideoRecordEventListenerProxyApi.VideoRecordEventListenerImpl(api, 1L);
     }
   }
 
   private static VideoRecordEvent.Status status() {
-    return mock(VideoRecordEvent.Status.class);
+    final VideoRecordEvent.Status event = mock(VideoRecordEvent.Status.class);
+    final RecordingStats stats = mock(RecordingStats.class);
+    when(event.getRecordingStats()).thenReturn(stats);
+    return event;
   }
 
   private static VideoRecordEvent.Start start() {
@@ -162,7 +166,7 @@ public class VideoRecordEventListenerStatusFilterTest {
     final TestProxyApiRegistrar registrar = new TestProxyApiRegistrar();
     final BinaryMessenger messenger = registrar.getBinaryMessenger();
     final VideoRecordEventListener listener =
-        registrar.getPigeonApiVideoRecordEventListener().pigeon_defaultConstructor();
+        registrar.getPigeonApiVideoRecordEventListener().pigeon_defaultConstructor(1L);
     registrar.getInstanceManager().addDartCreatedInstance(listener, 1L);
     final List<VideoRecordEvent.Status> frames = new ArrayList<>();
 
@@ -183,7 +187,7 @@ public class VideoRecordEventListenerStatusFilterTest {
     final TestProxyApiRegistrar registrar = new TestProxyApiRegistrar();
     final BinaryMessenger messenger = registrar.getBinaryMessenger();
     final VideoRecordEventListener listener =
-        registrar.getPigeonApiVideoRecordEventListener().pigeon_defaultConstructor();
+        registrar.getPigeonApiVideoRecordEventListener().pigeon_defaultConstructor(1L);
     registrar.getInstanceManager().addDartCreatedInstance(listener, 1L);
     final VideoRecordEvent.Start s = start();
     final VideoRecordEvent.Finalize e = finalizeEvent();

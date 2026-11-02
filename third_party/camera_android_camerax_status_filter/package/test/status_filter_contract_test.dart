@@ -52,8 +52,12 @@ class _Rig {
           ).thenAnswer((_) async => '/temp/REC${path++}.mp4');
           return manager;
         };
+    PigeonOverrides.videoRecordEventListener_allocateRecordingIdentity = () async => 1;
     PigeonOverrides.videoRecordEventListener_new =
-        ({required void Function(VideoRecordEventListener, VideoRecordEvent) onEvent}) {
+        ({
+              required void Function(VideoRecordEventListener, VideoRecordEvent) onEvent,
+              required int recordingIdentity,
+            }) {
           return VideoRecordEventListener.pigeon_detached(onEvent: onEvent);
         };
     PigeonOverrides.cameraCharacteristics_infoSupportedHardwareLevel =

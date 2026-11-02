@@ -80,11 +80,15 @@ class _DashcamRecIndicatorState extends State<DashcamRecIndicator> {
         color = colorScheme.primary;
         tooltip = 'Iniciando câmera…';
       case DashcamStatus.recording:
-        icon = Icons.fiber_manual_record;
-        color = colorScheme.error;
+        // Fase 16.2-R4.4-HW-MIG-5-SIG-2: the session is recording, but the red
+        // icon claims video of the current segment.
+        final confirmed = widget.controller.segmentPresentation == DashcamSegmentPresentation.videoConfirmed;
+        icon = confirmed ? Icons.fiber_manual_record : Icons.videocam_outlined;
+        color = confirmed ? colorScheme.error : colorScheme.onSurfaceVariant;
         final startedAt = widget.controller.recordingStartedAt;
         final elapsed = startedAt == null ? null : DateTime.now().difference(startedAt);
-        final recording = elapsed == null ? 'Gravando' : 'Gravando · ${_formatElapsed(elapsed)}';
+        final label = widget.controller.statusLabel;
+        final recording = elapsed == null ? label : '$label · ${_formatElapsed(elapsed)}';
         // Fase 16.2-R4.3-R2.6.10: video is still being recorded, but its
         // telemetry file failed (see DashcamSessionController.telemetryFailureMessage).
         final telemetryFailure = widget.controller.telemetryFailureMessage;

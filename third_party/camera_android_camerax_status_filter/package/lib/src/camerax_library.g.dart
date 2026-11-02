@@ -116,6 +116,7 @@ class PigeonOverrides {
   static VideoRecordEventListener Function({
     required void Function(VideoRecordEventListener pigeon_instance, VideoRecordEvent event)
     onEvent,
+    required int recordingIdentity,
   })?
   videoRecordEventListener_new;
 
@@ -263,6 +264,9 @@ class PigeonOverrides {
   /// Overrides [ProcessCameraProvider.getInstance].
   static Future<ProcessCameraProvider> Function()? processCameraProvider_getInstance;
 
+  /// Overrides [VideoRecordEventListener.allocateRecordingIdentity].
+  static Future<int> Function()? videoRecordEventListener_allocateRecordingIdentity;
+
   /// Overrides [ImageProxyUtils.getNv21Buffer].
   static Future<Uint8List> Function(int, int, List<PlaneProxy>)? imageProxyUtils_getNv21Buffer;
 
@@ -284,6 +288,7 @@ class PigeonOverrides {
     videoCapture_withOutput = null;
     recorder_new = null;
     videoRecordEventListener_new = null;
+    videoRecordEventListener_allocateRecordingIdentity = null;
     imageCapture_new = null;
     resolutionStrategy_new = null;
     resolutionStrategy_highestAvailableStrategy = null;
@@ -3666,20 +3671,29 @@ class Recorder extends PigeonInternalProxyApiBaseClass implements VideoOutput {
 }
 
 /// Listens for `VideoRecordEvent`s from a `PendingRecording`.
+///
+/// Synapse Auto (R4.4-HW-MIG-5-SIG-2.1): one per physical recording. Its identity reaches
+/// native with this object, before `PendingRecording.start`, and every evidence message of
+/// the recording carries it back.
 class VideoRecordEventListener extends PigeonInternalProxyApiBaseClass {
   factory VideoRecordEventListener({
     BinaryMessenger? pigeon_binaryMessenger,
     PigeonInstanceManager? pigeon_instanceManager,
     required void Function(VideoRecordEventListener pigeon_instance, VideoRecordEvent event)
     onEvent,
+    required int recordingIdentity,
   }) {
     if (PigeonOverrides.videoRecordEventListener_new != null) {
-      return PigeonOverrides.videoRecordEventListener_new!(onEvent: onEvent);
+      return PigeonOverrides.videoRecordEventListener_new!(
+        onEvent: onEvent,
+        recordingIdentity: recordingIdentity,
+      );
     }
     return VideoRecordEventListener.pigeon_new(
       pigeon_binaryMessenger: pigeon_binaryMessenger,
       pigeon_instanceManager: pigeon_instanceManager,
       onEvent: onEvent,
+      recordingIdentity: recordingIdentity,
     );
   }
 
@@ -3688,6 +3702,7 @@ class VideoRecordEventListener extends PigeonInternalProxyApiBaseClass {
     super.pigeon_binaryMessenger,
     super.pigeon_instanceManager,
     required this.onEvent,
+    required int recordingIdentity,
   }) {
     final int pigeonVar_instanceIdentifier = pigeon_instanceManager.addDartCreatedInstance(this);
     final _PigeonInternalProxyApiBaseCodec pigeonChannelCodec =
@@ -3702,6 +3717,7 @@ class VideoRecordEventListener extends PigeonInternalProxyApiBaseClass {
     );
     final Future<Object?> pigeonVar_sendFuture = pigeonVar_channel.send(<Object?>[
       pigeonVar_instanceIdentifier,
+      recordingIdentity,
     ]);
     () async {
       final pigeonVar_replyList = await pigeonVar_sendFuture as List<Object?>?;
@@ -3781,6 +3797,37 @@ class VideoRecordEventListener extends PigeonInternalProxyApiBaseClass {
         });
       }
     }
+  }
+
+  /// Synapse Auto (R4.4-HW-MIG-5-SIG-2.3): a value no other recording of this process had or will
+  /// have, from a counter that outlives a Dart isolate.
+  static Future<int> allocateRecordingIdentity({
+    BinaryMessenger? pigeon_binaryMessenger,
+    PigeonInstanceManager? pigeon_instanceManager,
+  }) async {
+    if (PigeonOverrides.videoRecordEventListener_allocateRecordingIdentity != null) {
+      return PigeonOverrides.videoRecordEventListener_allocateRecordingIdentity!();
+    }
+    final _PigeonInternalProxyApiBaseCodec pigeonChannelCodec = _PigeonInternalProxyApiBaseCodec(
+      pigeon_instanceManager ?? PigeonInstanceManager.instance,
+    );
+    final BinaryMessenger? pigeonVar_binaryMessenger = pigeon_binaryMessenger;
+    const pigeonVar_channelName =
+        'dev.flutter.pigeon.camera_android_camerax.VideoRecordEventListener.allocateRecordingIdentity';
+    final pigeonVar_channel = BasicMessageChannel<Object?>(
+      pigeonVar_channelName,
+      pigeonChannelCodec,
+      binaryMessenger: pigeonVar_binaryMessenger,
+    );
+    final Future<Object?> pigeonVar_sendFuture = pigeonVar_channel.send(null);
+    final pigeonVar_replyList = await pigeonVar_sendFuture as List<Object?>?;
+
+    final Object? pigeonVar_replyValue = _extractReplyValueOrThrow(
+      pigeonVar_replyList,
+      pigeonVar_channelName,
+      isNullValid: false,
+    );
+    return pigeonVar_replyValue! as int;
   }
 
   @override

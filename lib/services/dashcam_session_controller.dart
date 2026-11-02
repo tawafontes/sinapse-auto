@@ -217,6 +217,7 @@ class DashcamSessionController extends ChangeNotifier with WidgetsBindingObserve
     // — see [_onClipPublished].
     _publishedClipsSub = dashcamService.publishedClips.listen(_onClipPublished);
     dashcamService.cameraKnownUnavailableListenable.addListener(_onCameraKnownUnavailableChanged);
+    dashcamService.segmentPresentationListenable.addListener(_onSegmentPresentationChanged);
     dashcamPreferences.addListener(_onPreferencesChanged);
   }
 
@@ -692,6 +693,27 @@ class DashcamSessionController extends ChangeNotifier with WidgetsBindingObserve
       return DashcamStatus.cameraUnavailable;
     }
     return _liveStatus;
+  }
+
+  /// Fase 16.2-R4.4-HW-MIG-5-SIG-2: the one authority of everything that shows
+  /// REC — red only for [DashcamSegmentPresentation.videoConfirmed]. [status] is
+  /// not that authority: it stays `recording` through a rotation, which is also
+  /// what keeps the preview mounted. Nothing here is a [DashcamStatus], so no
+  /// session or camera decision can come to depend on it.
+  ///
+  /// [_recordingSessionId] is cleared in the first step of a stop, while
+  /// [_liveStatus] stays `recording` until that stop settles.
+  DashcamSegmentPresentation get segmentPresentation {
+    if (status != DashcamStatus.recording || _recordingSessionId == null) return DashcamSegmentPresentation.inactive;
+    return dashcamService.segmentPresentationListenable.value;
+  }
+
+  /// [status] as text, not claiming a recording [segmentPresentation] does not
+  /// confirm.
+  String get statusLabel => status == DashcamStatus.recording ? dashcamSegmentPresentationLabel(segmentPresentation) : dashcamStatusLabel(status);
+
+  void _onSegmentPresentationChanged() {
+    if (!_disposed && status == DashcamStatus.recording) notifyListeners();
   }
 
   /// Fase 16.2-R4.3-R2.6.21: set when this controller's camera session is
@@ -3400,6 +3422,7 @@ class DashcamSessionController extends ChangeNotifier with WidgetsBindingObserve
     WidgetsBinding.instance.removeObserver(this);
     dashcamPreferences.removeListener(_onPreferencesChanged);
     dashcamService.cameraKnownUnavailableListenable.removeListener(_onCameraKnownUnavailableChanged);
+    dashcamService.segmentPresentationListenable.removeListener(_onSegmentPresentationChanged);
     unawaited(_serviceErrorSub?.cancel());
     // Fase 16.2-R4.4-R1: a clip published after this reaches the late STOP pass
     // ([_watchLateStopSettlement], which outlives dispose) or the next start.

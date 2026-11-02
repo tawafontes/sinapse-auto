@@ -2256,8 +2256,12 @@ void main() {
               ).thenAnswer((_) async => outputPath);
               return mockSystemServicesManager;
             };
+        PigeonOverrides.videoRecordEventListener_allocateRecordingIdentity = () async => 1;
         PigeonOverrides.videoRecordEventListener_new =
-            ({required void Function(VideoRecordEventListener, VideoRecordEvent) onEvent}) {
+            ({
+              required void Function(VideoRecordEventListener, VideoRecordEvent) onEvent,
+              required int recordingIdentity,
+            }) {
               return VideoRecordEventListener.pigeon_detached(onEvent: onEvent);
             };
         PigeonOverrides.cameraCharacteristics_infoSupportedHardwareLevel =
@@ -2362,8 +2366,12 @@ void main() {
             ).thenAnswer((_) async => outputPath);
             return mockSystemServicesManager;
           };
+      PigeonOverrides.videoRecordEventListener_allocateRecordingIdentity = () async => 1;
       PigeonOverrides.videoRecordEventListener_new =
-          ({required void Function(VideoRecordEventListener, VideoRecordEvent) onEvent}) {
+          ({
+              required void Function(VideoRecordEventListener, VideoRecordEvent) onEvent,
+              required int recordingIdentity,
+            }) {
             return VideoRecordEventListener.pigeon_detached(onEvent: onEvent);
           };
       PigeonOverrides.cameraCharacteristics_infoSupportedHardwareLevel =
@@ -2463,8 +2471,12 @@ void main() {
             ).thenAnswer((_) async => outputPath);
             return mockSystemServicesManager;
           };
+      PigeonOverrides.videoRecordEventListener_allocateRecordingIdentity = () async => 1;
       PigeonOverrides.videoRecordEventListener_new =
-          ({required void Function(VideoRecordEventListener, VideoRecordEvent) onEvent}) {
+          ({
+              required void Function(VideoRecordEventListener, VideoRecordEvent) onEvent,
+              required int recordingIdentity,
+            }) {
             return VideoRecordEventListener.pigeon_detached(onEvent: onEvent);
           };
       PigeonOverrides.cameraCharacteristics_infoSupportedHardwareLevel =
@@ -2568,8 +2580,12 @@ void main() {
               ).thenAnswer((_) async => defaultTargetRotation);
               return mockDeviceOrientationManager;
             };
+        PigeonOverrides.videoRecordEventListener_allocateRecordingIdentity = () async => 1;
         PigeonOverrides.videoRecordEventListener_new =
-            ({required void Function(VideoRecordEventListener, VideoRecordEvent) onEvent}) {
+            ({
+              required void Function(VideoRecordEventListener, VideoRecordEvent) onEvent,
+              required int recordingIdentity,
+            }) {
               return VideoRecordEventListener.pigeon_detached(onEvent: onEvent);
             };
         PigeonOverrides.cameraCharacteristics_infoSupportedHardwareLevel =
@@ -2922,8 +2938,12 @@ void main() {
             ).thenAnswer((_) async => outputPath);
             return mockSystemServicesManager;
           };
+      PigeonOverrides.videoRecordEventListener_allocateRecordingIdentity = () async => 1;
       PigeonOverrides.videoRecordEventListener_new =
-          ({required void Function(VideoRecordEventListener, VideoRecordEvent) onEvent}) {
+          ({
+              required void Function(VideoRecordEventListener, VideoRecordEvent) onEvent,
+              required int recordingIdentity,
+            }) {
             return VideoRecordEventListener.pigeon_detached(onEvent: onEvent);
           };
       PigeonOverrides.cameraCharacteristics_infoSupportedHardwareLevel =
@@ -3136,8 +3156,12 @@ void main() {
             ).thenAnswer((_) async => outputPath);
             return mockSystemServicesManager;
           };
+      PigeonOverrides.videoRecordEventListener_allocateRecordingIdentity = () async => 1;
       PigeonOverrides.videoRecordEventListener_new =
-          ({required void Function(VideoRecordEventListener, VideoRecordEvent) onEvent}) {
+          ({
+              required void Function(VideoRecordEventListener, VideoRecordEvent) onEvent,
+              required int recordingIdentity,
+            }) {
             return VideoRecordEventListener.pigeon_detached(onEvent: onEvent);
           };
       PigeonOverrides.cameraCharacteristics_infoSupportedHardwareLevel =
@@ -5714,8 +5738,12 @@ void main() {
             ).thenAnswer((_) async => outputPath);
             return mockSystemServicesManager;
           };
+      PigeonOverrides.videoRecordEventListener_allocateRecordingIdentity = () async => 1;
       PigeonOverrides.videoRecordEventListener_new =
-          ({required void Function(VideoRecordEventListener, VideoRecordEvent) onEvent}) {
+          ({
+              required void Function(VideoRecordEventListener, VideoRecordEvent) onEvent,
+              required int recordingIdentity,
+            }) {
             return VideoRecordEventListener.pigeon_detached(onEvent: onEvent);
           };
       PigeonOverrides.cameraCharacteristics_infoSupportedHardwareLevel =

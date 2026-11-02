@@ -1,7 +1,9 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:camera_android_camerax/camera_android_camerax.dart' show RecordingEvidence, RecordingEvidenceSource;
 import 'package:camera_platform_interface/camera_platform_interface.dart';
+import 'package:flutter/foundation.dart' show ValueListenable, ValueNotifier;
 
 /// A minimal, real (not mocked) [CameraPlatform] implementation for tests —
 /// the same seam the `camera` plugin's own test suite uses
@@ -17,7 +19,7 @@ import 'package:camera_platform_interface/camera_platform_interface.dart';
 /// which is intentional: a test that exercises a path this fake doesn't
 /// support should fail loudly, not silently succeed against an
 /// under-specified double.
-class FakeCameraPlatform extends CameraPlatform {
+class FakeCameraPlatform extends CameraPlatform implements RecordingEvidenceSource {
   FakeCameraPlatform({required this.tempDir});
 
   final Directory tempDir;
@@ -96,6 +98,41 @@ class FakeCameraPlatform extends CameraPlatform {
   /// this fake does not model that internal state fully, only lets a test
   /// force the same *externally observable* failure).
   Object? failStartVideoCapturingWith;
+
+  /// Fase 16.2-R4.4-HW-MIG-5-SIG-2: the plugin's one evidence slot. While this
+  /// is true a START that succeeds also reports video, before it returns — what
+  /// every test about something other than REC wants. A REC test sets it to
+  /// false, so that a Start and video are separate facts, and calls
+  /// [emitVideoProgress]/[emitRecordingEnded] itself.
+  bool autoVideoEvidence = true;
+
+  final ValueNotifier<RecordingEvidence?> _recordingEvidence = ValueNotifier<RecordingEvidence?>(null);
+  int _lastEvidenceToken = 0;
+
+  @override
+  ValueListenable<RecordingEvidence?> get recordingEvidence => _recordingEvidence;
+
+  /// What the plugin does when a native `videoProgress` of the current
+  /// recording arrives.
+  void emitVideoProgress() {
+    final current = _recordingEvidence.value;
+    if (current == null || current.ended || current.videoProgress) return;
+    _recordingEvidence.value = RecordingEvidence(token: current.token, videoProgress: true);
+  }
+
+  /// What the plugin does when a native `recordingEnded` of the current
+  /// recording arrives.
+  void emitRecordingEnded({int error = 0}) {
+    final current = _recordingEvidence.value;
+    if (current == null || current.ended) return;
+    _recordingEvidence.value = RecordingEvidence(token: current.token, videoProgress: current.videoProgress, ended: true, endError: error);
+  }
+
+  /// The slot holding another recording with evidence of its own, with no clearing in between.
+  void moveEvidenceToAnotherRecording() => _recordingEvidence.value = RecordingEvidence(token: ++_lastEvidenceToken, videoProgress: true);
+
+  /// What the plugin's own dispose does to the slot.
+  void clearRecordingEvidence() => _recordingEvidence.value = null;
 
   int _nextCameraId = 0;
   int _clipIndex = 0;
@@ -215,10 +252,13 @@ class FakeCameraPlatform extends CameraPlatform {
   Future<void> startVideoCapturing(VideoCaptureOptions options) async {
     calls.add('startVideoCapturing');
     lastStartVideoCapturingOptions = options;
+    _recordingEvidence.value = null;
     final failure = failStartVideoCapturingWith;
     if (failure != null) throw failure;
+    _recordingEvidence.value = RecordingEvidence(token: ++_lastEvidenceToken);
     final pending = pendingStartVideoCapturing;
     if (pending != null) await pending.future;
+    if (autoVideoEvidence) emitVideoProgress();
   }
 
   /// Fase 16.2-R4.4-R1.2 (X66, single physical STOP): native stops currently
@@ -240,6 +280,7 @@ class FakeCameraPlatform extends CameraPlatform {
       if (pending != null) await pending.future;
       final delay = stopVideoRecordingDelay;
       if (delay != null) await Future<void>.delayed(delay);
+      emitRecordingEnded();
       final file = File('${tempDir.path}/fake_clip_${_clipIndex++}.mp4');
       // Non-empty so DashcamService's own File.length() read has something
       // real to report — content itself is never inspected by this app.

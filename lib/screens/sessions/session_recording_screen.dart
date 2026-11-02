@@ -2,7 +2,6 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
-import '../../models/dashcam_status.dart';
 import '../../models/unit_system.dart';
 import '../../services/dashcam_session_controller.dart';
 import '../../services/driving_session_recorder.dart';
@@ -184,7 +183,7 @@ class _SessionRecordingScreenState extends State<SessionRecordingScreen> {
                         if (widget.dashcamController != null)
                           _StatRow(
                             label: 'Dashcam',
-                            value: dashcamStatusLabel(widget.dashcamController!.status),
+                            value: widget.dashcamController!.statusLabel,
                           ),
                         // Fase 16.2-R4.3-R2.6.10: the video keeps recording, but the
                         // telemetry file failed and nothing more is being saved to it.

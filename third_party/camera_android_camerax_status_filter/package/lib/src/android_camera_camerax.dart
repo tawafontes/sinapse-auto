@@ -7,15 +7,59 @@ import 'dart:math' show Point;
 
 import 'package:async/async.dart';
 import 'package:camera_platform_interface/camera_platform_interface.dart';
-import 'package:flutter/foundation.dart' show Uint8List;
-import 'package:flutter/services.dart' show DeviceOrientation, PlatformException;
+import 'package:flutter/foundation.dart' show Uint8List, ValueListenable, ValueNotifier, debugPrint;
+import 'package:flutter/services.dart'
+    show BasicMessageChannel, DeviceOrientation, PlatformException, StandardMessageCodec;
 import 'package:flutter/widgets.dart' show Texture, Widget, visibleForTesting;
 import 'package:stream_transform/stream_transform.dart';
 import 'camerax_library.dart';
 import 'rotated_preview_delegate.dart';
 
+/// Synapse Auto (R4.4-HW-MIG-5-SIG-2): what is known about one recording, from the private channel
+/// fed by `VideoRecordEventListenerImpl`. [token] is the identity of the physical recording (SIG-2.1):
+/// allocated once per START, given to that recording's native listener when it is created, before
+/// `PendingRecording.start`, and carried back by every message about that recording.
+class RecordingEvidence {
+  /// Constructs a [RecordingEvidence].
+  const RecordingEvidence({
+    required this.token,
+    this.videoProgress = false,
+    this.ended = false,
+    this.endError,
+  });
+
+  /// Identifies one recording. Never reused while this Dart isolate lives, even by another instance.
+  final int token;
+
+  /// CameraX reported `getRecordedDurationNanos() > 0`: in 1.6.2 only `Recorder.writeVideoData`
+  /// writes that value, after the muxer accepted the sample, so at least two video samples of this
+  /// recording were accepted. It does not prove continuity, image content or durability.
+  final bool videoProgress;
+
+  /// This recording's `VideoRecordEvent.Finalize` was delivered.
+  final bool ended;
+
+  /// The `getError()` of that `Finalize`; 0 is `ERROR_NONE`.
+  final int? endError;
+}
+
+/// Synapse Auto (R4.4-HW-MIG-5-SIG-2): a [CameraPlatform] that reports [RecordingEvidence].
+abstract interface class RecordingEvidenceSource {
+  /// The evidence of the latest recording, or null when there is none. One slot, not a queue: a
+  /// late reader finds a fact delivered before it looked, and a message with another recording's
+  /// identity has no slot to land on.
+  ValueListenable<RecordingEvidence?> get recordingEvidence;
+}
+
+/// Synapse Auto (R4.4-HW-MIG-5-SIG-2): the current [CameraPlatform], if it reports evidence. Here so
+/// that the app does not need a runtime dependency on the platform interface.
+RecordingEvidenceSource? currentRecordingEvidenceSource() {
+  final CameraPlatform platform = CameraPlatform.instance;
+  return platform is RecordingEvidenceSource ? platform as RecordingEvidenceSource : null;
+}
+
 /// The Android implementation of [CameraPlatform] that uses the CameraX library.
-class AndroidCameraCameraX extends CameraPlatform {
+class AndroidCameraCameraX extends CameraPlatform implements RecordingEvidenceSource {
   /// Constructs an [AndroidCameraCameraX].
   AndroidCameraCameraX();
 
@@ -69,6 +113,103 @@ class AndroidCameraCameraX extends CameraPlatform {
   @visibleForTesting
   String? videoOutputPath;
 
+  // Created on first use: this object lives as long as the process and has no dispose of its own,
+  // so an instance that never records must not hold a notifier that is never disposed.
+  ValueNotifier<RecordingEvidence?>? _recordingEvidenceSlot;
+  ValueNotifier<RecordingEvidence?> get _recordingEvidence =>
+      _recordingEvidenceSlot ??= ValueNotifier<RecordingEvidence?>(null);
+
+  @override
+  ValueListenable<RecordingEvidence?> get recordingEvidence => _recordingEvidence;
+
+  // Keep the name in sync with VideoRecordEventListenerProxyApi.java.
+  static const BasicMessageChannel<Object?> _recordingEvidenceChannel = BasicMessageChannel<Object?>(
+    'synapse_auto.camera_android_camerax/recording_evidence',
+    StandardMessageCodec(),
+  );
+
+  // Synapse Auto (R4.4-HW-MIG-5-SIG-2.2): a channel name has one handler per messenger, so the handler
+  // belongs to this class and not to an instance: a second instance cannot silence the first. Each
+  // instance is here only while its slot holds that identity, so this retains nothing after a dispose.
+  static final Map<int, AndroidCameraCameraX> _recordingEvidenceOwners =
+      <int, AndroidCameraCameraX>{};
+
+  /// How many recordings of this isolate can currently receive evidence.
+  @visibleForTesting
+  static int get recordingEvidenceOwnerCount => _recordingEvidenceOwners.length;
+
+  // Not in a constructor: registerWith() runs before a binding exists. At every START, before anything
+  // that can produce an event: the same handler replaces itself, which is a no-op, and takes the channel
+  // back if something displaced it. Never removed: without a handler, the framework keeps a message
+  // for whoever installs one next. A failure leaves no evidence, which reads as "not confirmed", and
+  // must not fail the START.
+  static void _installRecordingEvidenceHandler() {
+    try {
+      _recordingEvidenceChannel.setMessageHandler(_onRecordingEvidenceMessage);
+    } catch (error) {
+      debugPrint('recording evidence channel unavailable: $error');
+    }
+  }
+
+  static Future<Object?> _onRecordingEvidenceMessage(Object? message) async {
+    if (message is List<Object?> && message.length == 3 && message[1] is int) {
+      final Object? kind = message[0];
+      final identity = message[1]! as int;
+      final Object? error = message[2];
+      if ((kind == 'videoProgress' && error == null) ||
+          (kind == 'recordingEnded' && error is int?)) {
+        // Nobody holding it: a recording already let go of, or one from before a hot restart.
+        _recordingEvidenceOwners[identity]?._applyRecordingEvidence(
+          identity,
+          kind == 'recordingEnded',
+          error as int?,
+        );
+        return null;
+      }
+    }
+    debugPrint('malformed recording evidence message: $message');
+    return null;
+  }
+
+  void _applyRecordingEvidence(int identity, bool ended, int? error) {
+    final RecordingEvidence? current = _recordingEvidence.value;
+    // Only the identity says whose message this is. Anything else belongs to a recording this slot no
+    // longer holds, however it looks. After the end nothing about this recording can change.
+    if (current == null || identity != current.token || current.ended) {
+      return;
+    }
+    if (ended) {
+      _recordingEvidence.value = RecordingEvidence(
+        token: current.token,
+        videoProgress: current.videoProgress,
+        ended: true,
+        endError: error,
+      );
+    } else if (!current.videoProgress) {
+      _recordingEvidence.value = RecordingEvidence(token: current.token, videoProgress: true);
+    }
+  }
+
+  // Only this instance's own entry: whoever holds an identity now is not this instance's to remove.
+  void _releaseRecordingEvidenceOwner() {
+    final int? token = _recordingEvidenceSlot?.value?.token;
+    if (identical(_recordingEvidenceOwners[token], this)) {
+      _recordingEvidenceOwners.remove(token);
+    }
+  }
+
+  void _clearRecordingEvidence() {
+    _releaseRecordingEvidenceOwner();
+    _recordingEvidenceSlot?.value = null;
+  }
+
+  // Synapse Auto (R4.4-HW-MIG-5-SIG-2.3): this object is reused by the next camera, so what a dispose
+  // ends is a camera session, not the instance. A START belongs to the epoch it began in: a dispose
+  // moves it on entry and on exit, so a START caught on either side of it never holds evidence, and
+  // a failed release cannot bring back what the entry withdrew. Only a new START holds evidence again.
+  int _recordingEvidenceEpoch = 0;
+  int _disposesInProgress = 0;
+
   /// Handles access to system resources.
   late final SystemServicesManager systemServicesManager = SystemServicesManager(
     onCameraError: (_, String errorDescription) {
@@ -107,11 +248,32 @@ class AndroidCameraCameraX extends CameraPlatform {
   final StreamQueue<VideoRecordEvent> videoRecordingEventStreamQueue =
       StreamQueue<VideoRecordEvent>(videoRecordingEventStreamController.stream);
 
-  late final VideoRecordEventListener _videoRecordingEventListener = VideoRecordEventListener(
-    onEvent: (_, VideoRecordEvent event) {
-      videoRecordingEventStreamController.add(event);
-    },
-  );
+  // Synapse Auto (R4.4-HW-MIG-5-SIG-2.1): one per physical recording, created in the step that
+  // binds its identity and starts it; see [_bindRecordingIdentity]. Keeps the current one alive.
+  VideoRecordEventListener? _videoRecordingEventListener;
+
+  // [identity] comes from VideoRecordEventListener.allocateRecordingIdentity, not from here: native's
+  // counter outlives this isolate, and no number chosen here could rule out one a surviving recording
+  // of a previous isolate still reports (see "Identity" in the fork's README).
+  //
+  // Synchronous, and right before PendingRecording.start: the slot holds this identity and native has
+  // it, in message order, before CameraX can call back. Status never reaches Pigeon, so this adds one
+  // proxy per recording, not per frame.
+  VideoRecordEventListener _bindRecordingIdentity(int identity, int startEpoch) {
+    _releaseRecordingEvidenceOwner();
+    if (_disposesInProgress == 0 && startEpoch == _recordingEvidenceEpoch) {
+      _recordingEvidenceOwners[identity] = this;
+      _recordingEvidence.value = RecordingEvidence(token: identity);
+    } else {
+      _recordingEvidenceSlot?.value = null;
+    }
+    return _videoRecordingEventListener = VideoRecordEventListener(
+      recordingIdentity: identity,
+      onEvent: (_, VideoRecordEvent event) {
+        videoRecordingEventStreamController.add(event);
+      },
+    );
+  }
 
   /// Whether or not [preview] has been bound to the lifecycle of the camera by
   /// [createCamera].
@@ -513,17 +675,26 @@ class AndroidCameraCameraX extends CameraPlatform {
   /// Releases the resources of the accessed camera with ID [cameraId].
   @override
   Future<void> dispose(int cameraId) async {
-    await preview?.releaseSurfaceProvider();
-    await liveCameraState?.removeObservers();
-    await processCameraProvider?.unbindAll();
-    await imageAnalysis?.clearAnalyzer();
-    await deviceOrientationManager.stopListeningForDeviceOrientationChange();
+    // Before the first await, whatever the release below does.
+    _recordingEvidenceEpoch++;
+    _disposesInProgress++;
+    _clearRecordingEvidence();
+    try {
+      await preview?.releaseSurfaceProvider();
+      await liveCameraState?.removeObservers();
+      await processCameraProvider?.unbindAll();
+      await imageAnalysis?.clearAnalyzer();
+      await deviceOrientationManager.stopListeningForDeviceOrientationChange();
 
-    // `processCameraProvider.unbindAll()` implicitly finalizes active recordings natively.
-    // Clear the Dart state here to prevent an exception on resume.
-    recording = null;
-    pendingRecording = null;
-    videoOutputPath = null;
+      // `processCameraProvider.unbindAll()` implicitly finalizes active recordings natively.
+      // Clear the Dart state here to prevent an exception on resume.
+      recording = null;
+      pendingRecording = null;
+      videoOutputPath = null;
+    } finally {
+      _recordingEvidenceEpoch++;
+      _disposesInProgress--;
+    }
   }
 
   /// The camera with ID [cameraId] has been initialized.
@@ -1143,6 +1314,12 @@ class AndroidCameraCameraX extends CameraPlatform {
       // There is currently an active recording, so do not start a new one.
       return;
     }
+    _installRecordingEvidenceHandler();
+    _clearRecordingEvidence();
+    final int evidenceEpoch = _recordingEvidenceEpoch;
+    // First, so that a dispose has no new moment to clear what the steps below prepare, and a failure
+    // here leaves the camera as it was.
+    final int identity = await VideoRecordEventListener.allocateRecordingIdentity();
     final dynamic Function(CameraImageData)? streamCallback = options.streamCallback;
     if (streamCallback == null) {
       // For potential performance improvements, unbind imageAnalysis if not in use.
@@ -1176,7 +1353,7 @@ class AndroidCameraCameraX extends CameraPlatform {
       !enableRecordingAudio,
     );
 
-    recording = await pendingRecording!.start(_videoRecordingEventListener);
+    recording = await pendingRecording!.start(_bindRecordingIdentity(identity, evidenceEpoch));
 
     if (streamCallback != null) {
       onStreamedFrameAvailable(options.cameraId).listen(streamCallback);

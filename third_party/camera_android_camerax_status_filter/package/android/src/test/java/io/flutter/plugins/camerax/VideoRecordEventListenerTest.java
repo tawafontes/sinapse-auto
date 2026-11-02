@@ -21,7 +21,7 @@ public class VideoRecordEventListenerTest {
         new TestProxyApiRegistrar().getPigeonApiVideoRecordEventListener();
 
     assertTrue(
-        api.pigeon_defaultConstructor()
+        api.pigeon_defaultConstructor(1L)
             instanceof VideoRecordEventListenerProxyApi.VideoRecordEventListenerImpl);
   }
 
@@ -31,7 +31,7 @@ public class VideoRecordEventListenerTest {
     when(mockApi.getPigeonRegistrar()).thenReturn(new TestProxyApiRegistrar());
 
     final VideoRecordEventListenerProxyApi.VideoRecordEventListenerImpl instance =
-        new VideoRecordEventListenerProxyApi.VideoRecordEventListenerImpl(mockApi);
+        new VideoRecordEventListenerProxyApi.VideoRecordEventListenerImpl(mockApi, 1L);
     final androidx.camera.video.VideoRecordEvent event = mock(VideoRecordEvent.class);
     instance.onEvent(event);
 

@@ -3837,12 +3837,24 @@ abstract class PigeonApiRecorder(open val pigeonRegistrar: CameraXLibraryPigeonP
     return pigeonRegistrar.getPigeonApiVideoOutput()
   }
 }
-/** Listens for `VideoRecordEvent`s from a `PendingRecording`. */
+/**
+ * Listens for `VideoRecordEvent`s from a `PendingRecording`.
+ *
+ * Synapse Auto (R4.4-HW-MIG-5-SIG-2.1): one per physical recording. Its identity reaches
+ * native with this object, before `PendingRecording.start`, and every evidence message of
+ * the recording carries it back.
+ */
 @Suppress("UNCHECKED_CAST")
 abstract class PigeonApiVideoRecordEventListener(
     open val pigeonRegistrar: CameraXLibraryPigeonProxyApiRegistrar
 ) {
-  abstract fun pigeon_defaultConstructor(): VideoRecordEventListener
+  abstract fun pigeon_defaultConstructor(recordingIdentity: Long): VideoRecordEventListener
+
+  /**
+   * Synapse Auto (R4.4-HW-MIG-5-SIG-2.3): a value no other recording of this process had or will
+   * have, from a counter that outlives a Dart isolate.
+   */
+  abstract fun allocateRecordingIdentity(): Long
 
   companion object {
     @Suppress("LocalVariableName")
@@ -3861,11 +3873,32 @@ abstract class PigeonApiVideoRecordEventListener(
           channel.setMessageHandler { message, reply ->
             val args = message as List<Any?>
             val pigeon_identifierArg = args[0] as Long
+            val recordingIdentityArg = args[1] as Long
             val wrapped: List<Any?> =
                 try {
                   api.pigeonRegistrar.instanceManager.addDartCreatedInstance(
-                      api.pigeon_defaultConstructor(), pigeon_identifierArg)
+                      api.pigeon_defaultConstructor(recordingIdentityArg), pigeon_identifierArg)
                   listOf(null)
+                } catch (exception: Throwable) {
+                  CameraXLibraryPigeonUtils.wrapError(exception)
+                }
+            reply.reply(wrapped)
+          }
+        } else {
+          channel.setMessageHandler(null)
+        }
+      }
+      run {
+        val channel =
+            BasicMessageChannel<Any?>(
+                binaryMessenger,
+                "dev.flutter.pigeon.camera_android_camerax.VideoRecordEventListener.allocateRecordingIdentity",
+                codec)
+        if (api != null) {
+          channel.setMessageHandler { _, reply ->
+            val wrapped: List<Any?> =
+                try {
+                  listOf(api.allocateRecordingIdentity())
                 } catch (exception: Throwable) {
                   CameraXLibraryPigeonUtils.wrapError(exception)
                 }

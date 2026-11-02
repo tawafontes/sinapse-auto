@@ -18,5 +18,7 @@ The reference for the hash is the pub.dev API, not this repository's history: fi
 |---|---|
 | `0001-drop-VideoRecordEvent-Status-before-Pigeon.patch` | `9852fa3975a8a6be1885951fb4a525a00c2a85c05a26df807aa2cfab077a520e` |
 | `0002-status-filter-tests.patch` | `42375e31b40c22d9ba295972402ecf313a30773b5c9e0376a9715b537e833ac1` |
+| `0003-recording-evidence-channel.patch` | `e86f3313728d97a39a6ce2b74ee79188d0af55723f36c8c3b9905199811bbfdc` |
+| `0004-recording-evidence-tests.patch` | `a4441543325163232522f293290de614a8466e2df916fb79e6061d9c2f598282` |
 
 `verify.sh` checks all of this byte for byte. See [README.md](README.md).

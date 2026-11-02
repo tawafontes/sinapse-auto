@@ -46,6 +46,46 @@ enum DashcamStatus {
   finalizing,
 }
 
+/// Fase 16.2-R4.4-HW-MIG-5-SIG-2: what the REC indicators may claim about the
+/// current segment, apart from [DashcamStatus] — the session stays `recording`
+/// through a rotation (and the preview stays mounted because of that), so this
+/// could not be another status. Only [videoConfirmed] is shown as REC.
+enum DashcamSegmentPresentation {
+  /// No segment is being presented: the session is not recording, or it is
+  /// being stopped.
+  inactive,
+
+  /// A rotation is ending the previous segment.
+  transitioning,
+
+  /// A START is in progress or returned, with no video confirmed yet. A
+  /// recorder that started is not proof of video.
+  startPending,
+
+  /// The muxer accepted video of the current segment, and its end has not been
+  /// observed. Not proof of continuous recording, image content or durability.
+  videoConfirmed,
+
+  /// The current segment ended by itself, with no stop requested.
+  segmentEnded,
+}
+
+/// What to say instead of REC while [DashcamStatus.recording] holds.
+String dashcamSegmentPresentationLabel(DashcamSegmentPresentation presentation) {
+  switch (presentation) {
+    case DashcamSegmentPresentation.inactive:
+      return 'Encerrando gravação…';
+    case DashcamSegmentPresentation.transitioning:
+      return 'Trocando segmento…';
+    case DashcamSegmentPresentation.startPending:
+      return 'Iniciando segmento…';
+    case DashcamSegmentPresentation.videoConfirmed:
+      return dashcamStatusLabel(DashcamStatus.recording);
+    case DashcamSegmentPresentation.segmentEnded:
+      return 'Segmento encerrado inesperadamente';
+  }
+}
+
 String dashcamStatusLabel(DashcamStatus status) {
   switch (status) {
     case DashcamStatus.disabled:
