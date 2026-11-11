@@ -154,6 +154,30 @@ void _stopFromPreview(DashcamSessionController controller) {
   );
 }
 
+/// The dashcam fullscreen's double-tap ([SensorFullscreenScreen.confirmExit]):
+/// with nothing recording it just leaves; while the session records it asks
+/// "Deseja encerrar a gravação?" — "Sim" issues the same stop as "Parar" and
+/// leaves, "Não" (or dismissing the dialog) stays and keeps recording.
+Future<bool> confirmLeaveDashcamFullscreen(BuildContext context, DashcamSessionController controller) async {
+  if (!_canStopFromPreview(controller)) return true;
+  final end = await showDialog<bool>(
+    context: context,
+    builder: (dialogContext) => AlertDialog(
+      title: const Text('Deseja encerrar a gravação?'),
+      content: const Text('A gravação e a sessão de condução serão finalizadas e salvas.'),
+      actions: [
+        TextButton(onPressed: () => Navigator.of(dialogContext).pop(false), child: const Text('Não')),
+        FilledButton(onPressed: () => Navigator.of(dialogContext).pop(true), child: const Text('Sim')),
+      ],
+    ),
+  );
+  if (end != true) return false;
+  // The session may have ended while the dialog was open (e.g. stopped from
+  // the session screen): stopSession() then joins or finds nothing to stop.
+  _stopFromPreview(controller);
+  return true;
+}
+
 class _StopButton extends StatelessWidget {
   const _StopButton({required this.controller});
 

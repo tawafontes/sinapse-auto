@@ -201,4 +201,83 @@ void main() {
       await tester.runAsync(rig.close);
     }
   });
+
+  group('confirmLeaveDashcamFullscreen (the fullscreen double-tap)', () {
+    Future<BuildContext> mountHost(WidgetTester tester) async {
+      await tester.pumpWidget(const MaterialApp(home: Scaffold(body: SizedBox.expand(key: Key('host')))));
+      return tester.element(find.byKey(const Key('host')));
+    }
+
+    /// Asks in the REAL zone, so the stop a "Sim" issues (Hive, files) runs
+    /// there too — the dialog itself is shown and answered by frames.
+    Future<Future<bool>> ask(WidgetTester tester, _Rig rig, BuildContext context) async {
+      late Future<bool> answer;
+      // A block body: an arrow would return the answer's Future, and runAsync
+      // would wait for a dialog nobody has answered yet.
+      await tester.runAsync(() async {
+        answer = confirmLeaveDashcamFullscreen(context, rig.controller);
+      });
+      await tester.pumpAndSettle();
+      return answer;
+    }
+
+    testWidgets('with nothing recording it leaves at once, without asking', (tester) async {
+      final rig = _Rig();
+      await tester.runAsync(rig.start);
+      try {
+        final context = await mountHost(tester);
+        final answer = await ask(tester, rig, context);
+        expect(find.text('Deseja encerrar a gravação?'), findsNothing);
+        await tester.runAsync(() async => expect(await answer, isTrue));
+      } finally {
+        await tester.runAsync(rig.close);
+      }
+    });
+
+    testWidgets('while recording it asks; "Não" stays and keeps recording', (tester) async {
+      final rig = _Rig();
+      await tester.runAsync(rig.start);
+      try {
+        await tester.runAsync(() async {
+          rig.controller.startSession();
+          await rig.until(() => rig.controller.status == DashcamStatus.recording, 'the session recording');
+        });
+        final context = await mountHost(tester);
+        final answer = await ask(tester, rig, context);
+        expect(find.text('Deseja encerrar a gravação?'), findsOneWidget);
+
+        await tester.tap(find.text('Não'));
+        await tester.pumpAndSettle();
+        await tester.runAsync(() async => expect(await answer, isFalse));
+        expect(rig.recorder.state, DrivingSessionRecorderState.recording);
+        expect(rig.count('stopVideoRecording'), 0);
+      } finally {
+        await tester.runAsync(rig.close);
+      }
+    });
+
+    testWidgets('while recording, "Sim" stops the camera and the session and leaves', (tester) async {
+      final rig = _Rig();
+      await tester.runAsync(rig.start);
+      try {
+        await tester.runAsync(() async {
+          rig.controller.startSession();
+          await rig.until(() => rig.controller.status == DashcamStatus.recording, 'the session recording');
+        });
+        final context = await mountHost(tester);
+        final answer = await ask(tester, rig, context);
+
+        await tester.tap(find.text('Sim'));
+        await tester.pumpAndSettle();
+        await tester.runAsync(() async {
+          expect(await answer, isTrue);
+          await rig.until(() => rig.recorder.state == DrivingSessionRecorderState.idle && !rig.service.hasPendingNativeStop, 'the session stopped');
+        });
+        expect(rig.count('stopVideoRecording'), 1);
+        expect(Hive.box<DrivingSession>(HiveBoxNames.drivingSessions).values.single.endTime, isNotNull);
+      } finally {
+        await tester.runAsync(rig.close);
+      }
+    });
+  });
 }

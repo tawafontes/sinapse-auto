@@ -944,6 +944,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           onResetRecords: controller.protectCurrentClip,
           resetRecordsLabel: 'Proteger este clipe',
           resetRecordsIcon: Icons.shield_outlined,
+          confirmExit: (context) => confirmLeaveDashcamFullscreen(context, controller),
         ),
       ),
     );
