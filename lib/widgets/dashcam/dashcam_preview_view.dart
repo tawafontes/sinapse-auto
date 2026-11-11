@@ -6,7 +6,7 @@ import 'package:flutter/material.dart';
 import '../../models/dashcam_status.dart';
 import '../../screens/settings/dashcam_settings_screen.dart';
 import '../../services/dashcam_session_controller.dart';
-import '../../services/driving_session_recorder.dart' show SessionAdmissionRejected;
+import '../../services/driving_session_recorder.dart' show DrivingSessionRecorderState, SessionAdmissionRejected;
 
 /// The Dashcam fullscreen `content` (pushed via the same `SensorFullscreenScreen`
 /// every other instrument uses, Fase 15) — a live [CameraPreview] with a
@@ -105,6 +105,10 @@ class _StatusBar extends StatelessWidget {
               '${formatMb(controller.totalClipBytes)} / ${formatMb(controller.quotaBytes)} MB',
               style: const TextStyle(color: Colors.white70, fontSize: 12),
             ),
+            if (_canStopFromPreview(controller)) ...[
+              const SizedBox(width: 12),
+              _StopButton(controller: controller),
+            ],
           ],
         ),
       ),
@@ -122,6 +126,51 @@ void _startFromTile(DashcamSessionController controller) {
     controller.startSession();
   } on SessionAdmissionRejected {
     // Expected and side-effect-free — see above.
+  }
+}
+
+/// Whether this preview offers to stop: only while the driving session is
+/// recording — not while it is being finalized (the stop is already under way)
+/// and not after a failed finalization, whose retry stays on the session
+/// screen (see the idle message below).
+bool _canStopFromPreview(DashcamSessionController controller) =>
+    controller.sessionRecorder.state == DrivingSessionRecorderState.recording;
+
+bool _cameraEngaged(DashcamStatus status) => switch (status) {
+  DashcamStatus.initializing || DashcamStatus.recording || DashcamStatus.cameraUnavailable || DashcamStatus.error => true,
+  DashcamStatus.disabled || DashcamStatus.idle || DashcamStatus.finalizing => false,
+};
+
+/// The same request as the session screen's "Finalizar sessão": it stops the
+/// camera and finishes the driving session together, and a double tap joins
+/// the stop already in flight ([DashcamSessionController.stopSession]). A
+/// persistence failure is kept by the recorder and offered for retry on the
+/// session screen; anything else must still surface.
+void _stopFromPreview(DashcamSessionController controller) {
+  unawaited(
+    controller.stopSession().catchError((Object error) {
+      if (controller.sessionRecorder.state != DrivingSessionRecorderState.finalizationFailed) throw error;
+    }),
+  );
+}
+
+class _StopButton extends StatelessWidget {
+  const _StopButton({required this.controller});
+
+  final DashcamSessionController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    return FilledButton.icon(
+      style: FilledButton.styleFrom(
+        backgroundColor: Theme.of(context).colorScheme.error,
+        foregroundColor: Theme.of(context).colorScheme.onError,
+        visualDensity: VisualDensity.compact,
+      ),
+      onPressed: () => _stopFromPreview(controller),
+      icon: const Icon(Icons.stop),
+      label: const Text('Parar'),
+    );
   }
 }
 
@@ -214,6 +263,17 @@ class _EmptyState extends StatelessWidget {
           Text(message, textAlign: TextAlign.center, style: TextStyle(color: colorScheme.onSurfaceVariant)),
           const SizedBox(height: 24),
           action,
+          // The session may be recording while the camera is still starting,
+          // briefly unavailable or in error: stopping must not depend on it.
+          // Not while the camera is idle/disabled/finalizing: nothing is being
+          // recorded by it then, and that view already offers its own start for
+          // the session (a recorder-only session, e.g. the dashcam enabled
+          // mid-session) — a stop next to "Nenhuma sessão em andamento" would
+          // read as a contradiction. The session screen still stops it.
+          if (_cameraEngaged(status) && _canStopFromPreview(controller)) ...[
+            const SizedBox(height: 16),
+            _StopButton(controller: controller),
+          ],
         ],
       ),
     );
