@@ -7,6 +7,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:hive/hive.dart';
 import 'package:synapse_auto/models/dashcam_clip_record.dart';
 import 'package:synapse_auto/models/dashcam_config.dart';
+import 'package:synapse_auto/models/driving_session.dart';
 import 'package:synapse_auto/screens/sessions/dashcam_playback_screen.dart';
 import 'package:synapse_auto/screens/sessions/dashcam_recordings_screen.dart';
 import 'package:synapse_auto/services/hive_boxes.dart';
@@ -76,5 +77,51 @@ void main() {
   testWidgets('with no clip it says there is nothing yet', (tester) async {
     await tester.pumpWidget(const MaterialApp(home: DashcamRecordingsScreen()));
     expect(find.textContaining('Nenhuma gravação ainda.'), findsOneWidget);
+  });
+
+  testWidgets('the delete button asks first, then deletes that clip and refreshes the list', (tester) async {
+    late File kept;
+    late File doomed;
+    await tester.runAsync(() async {
+      Hive.registerAdapter(DrivingSessionAdapter(), override: true);
+      await Hive.openBox<DrivingSession>(HiveBoxNames.drivingSessions);
+      await Hive.box<DrivingSession>(HiveBoxNames.drivingSessions).put('A', DrivingSession(id: 'A', startTime: DateTime(2026, 11, 11, 7), endTime: DateTime(2026, 11, 11, 9)));
+      kept = await File('${dir.path}/dashcam_clips/kept.mp4').create(recursive: true);
+      doomed = await File('${dir.path}/dashcam_clips/doomed.mp4').create(recursive: true);
+      await Hive.box(HiveBoxNames.dashcamSessionVideos).put('A', [
+        DashcamClipRecord(filePath: kept.path, recordedAt: DateTime(2026, 11, 11, 8, 0, 0), durationSeconds: 75, sizeBytes: 3 * 1024 * 1024),
+        DashcamClipRecord(filePath: doomed.path, recordedAt: DateTime(2026, 11, 11, 8, 10, 0), durationSeconds: 75, sizeBytes: 3 * 1024 * 1024),
+      ]);
+    });
+    await tester.pumpWidget(const MaterialApp(home: DashcamRecordingsScreen()));
+    expect(find.byTooltip('Excluir vídeo'), findsNWidgets(2));
+
+    // The newest clip (08:10:00) is listed first. Its button's callback runs in
+    // the real zone, so the deletion's Hive and file I/O can progress.
+    final button = tester.widgetList<IconButton>(find.widgetWithIcon(IconButton, Icons.delete_outline)).first;
+    await tester.runAsync(() async {
+      button.onPressed!(); // a block: an arrow would wait for the dialog's answer
+    });
+    await tester.pumpAndSettle();
+    expect(find.text('Excluir este vídeo?'), findsOneWidget);
+
+    await tester.tap(find.text('Cancelar'));
+    await tester.pumpAndSettle();
+    expect(doomed.existsSync(), isTrue, reason: 'cancelled: nothing deleted');
+
+    await tester.runAsync(() async {
+      button.onPressed!(); // a block: an arrow would wait for the dialog's answer
+    });
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Excluir'));
+    for (var i = 0; i < 400 && find.text('Vídeo excluído.').evaluate().isEmpty; i++) {
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 5)));
+      await tester.pump();
+    }
+    expect(find.text('Vídeo excluído.'), findsOneWidget);
+    expect(doomed.existsSync(), isFalse);
+    expect(kept.existsSync(), isTrue);
+    expect(find.text('08:10:00'), findsNothing);
+    expect(find.text('08:00:00'), findsOneWidget);
   });
 }

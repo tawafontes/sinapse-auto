@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:hive/hive.dart';
 
 import '../../models/dashcam_clip_record.dart';
+import '../../services/dashcam_storage_quota.dart' show DashcamClipDeletionOutcome, DashcamClipDeletionRejected, deleteDashcamClipByUser;
 import '../../services/hive_boxes.dart';
 import 'dashcam_playback_screen.dart';
 
@@ -48,6 +49,44 @@ class _DashcamRecordingsScreenState extends State<DashcamRecordingsScreen> {
 
   static String _formatSize(int bytes) => '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
 
+  Future<void> _delete(DashcamRecordingEntry entry) async {
+    final local = entry.clip.recordedAt.toLocal();
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Excluir este vídeo?'),
+        content: Text(
+          'O vídeo de ${_formatDay(local)} às ${_formatTime(local)} será apagado do app'
+          '${entry.clip.isProtected ? ', mesmo estando protegido' : ''}. '
+          'A cópia na galeria do celular, se houver, não é apagada.',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(dialogContext).pop(false), child: const Text('Cancelar')),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Theme.of(dialogContext).colorScheme.error),
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('Excluir'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    String message;
+    try {
+      final outcome = await deleteDashcamClipByUser(sessionId: entry.sessionId, filePath: entry.clip.filePath);
+      message = switch (outcome) {
+        DashcamClipDeletionOutcome.deleted || DashcamClipDeletionOutcome.notIndexed => 'Vídeo excluído.',
+        DashcamClipDeletionOutcome.fileFailed => 'Não foi possível apagar o arquivo do vídeo. Tente novamente.',
+        DashcamClipDeletionOutcome.entryFailed => 'Vídeo apagado; a lista termina de se atualizar na próxima abertura do app.',
+      };
+    } on DashcamClipDeletionRejected {
+      message = 'Este vídeo é de uma sessão em andamento. Finalize a sessão antes de excluí-lo.';
+    }
+    if (!mounted) return;
+    setState(() => _entries = loadDashcamRecordings());
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+  }
+
   Future<void> _open(DashcamRecordingEntry entry) async {
     await Navigator.of(context).push(
       MaterialPageRoute(builder: (_) => DashcamPlaybackScreen(clip: entry.clip, sessionId: entry.sessionId)),
@@ -93,7 +132,11 @@ class _DashcamRecordingsScreenState extends State<DashcamRecordingsScreen> {
                         leading: Icon(entry.clip.isProtected ? Icons.shield : Icons.videocam),
                         title: Text(_formatTime(local)),
                         subtitle: Text('${_formatDuration(entry.clip.durationSeconds)} · ${_formatSize(entry.clip.sizeBytes)}'),
-                        trailing: const Icon(Icons.play_arrow),
+                        trailing: IconButton(
+                          icon: const Icon(Icons.delete_outline),
+                          tooltip: 'Excluir vídeo',
+                          onPressed: () => _delete(entry),
+                        ),
                         onTap: () => _open(entry),
                       ),
                     ],

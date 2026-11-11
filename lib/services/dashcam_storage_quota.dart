@@ -13,7 +13,7 @@ import '../models/driving_session.dart';
 import 'dashcam_clip_files.dart';
 import 'dashcam_clip_index.dart' show runInClipIndexQueue;
 import 'dashcam_storage_probe.dart';
-import 'driving_session_recorder.dart' show sessionDeletionCommitted;
+import 'driving_session_recorder.dart' show DrivingSessionRecorder, sessionDeletionCommitted;
 import 'hive_boxes.dart';
 
 /// Fase 16.2-R4.4-R2 — the dashcam's PHYSICAL storage quota and free-space
@@ -1058,13 +1058,100 @@ Future<_EvictionOutcome> _evict(
   final deleted = afterEvictedFileDeletedHookForTest;
   if (deleted != null) await deleted(path);
   try {
-    await _removeIndexEntry(victim.descriptor, victim.file.name);
+    await _removeIndexEntry(victim.descriptor.sessionId, victim.file.name);
   } catch (error) {
     DashcamStorageCounters.evictionEntryFailures++;
     debugPrint('dashcam storage: eviction failed at the index entry (${error.runtimeType}); the file is gone, the entry is removed by the next start');
     return _EvictionOutcome.entryFailed;
   }
   return _EvictionOutcome.evicted;
+}
+
+/// A clip deletion the user asked for was refused before anything was touched:
+/// a recorder of this process still controls the clip's session (recording,
+/// finalizing, or its finalization failed) — its STOP passes still own that
+/// session's clips. Finalize the session first.
+class DashcamClipDeletionRejected extends StateError {
+  DashcamClipDeletionRejected(super.message);
+}
+
+/// What [deleteDashcamClipByUser] did.
+enum DashcamClipDeletionOutcome {
+  /// The file is gone and so is its index entry.
+  deleted,
+
+  /// The clip is no longer in its session's index (evicted by the quota,
+  /// deleted with its session, or already deleted): nothing done.
+  notIndexed,
+
+  /// The file could not be removed: kept, still indexed.
+  fileFailed,
+
+  /// The file is gone but the entry write failed: the next start removes the
+  /// dangling entry (`measureDashcamStorageAtStartup`).
+  entryFailed,
+}
+
+/// The user's "Excluir" on one recorded clip — the same steps as a quota
+/// eviction ([_evict]), in its own turn of the index FIFO so it never
+/// interleaves with an indexing, a protection or a quota pass: in ONE
+/// synchronous slice the clip is checked against the CURRENT index (its
+/// session still has it, the session's record exists and is not being
+/// deleted) and its unlink is issued; then the file's absence is confirmed;
+/// then the entry is removed (the key itself when that empties it). File
+/// first, for the reason [_evict] gives. Unlike an eviction it removes a
+/// PROTECTED clip too: the user chose this one.
+///
+/// Refused up front, and again at the turn's start, while a recorder still
+/// controls the session ([DashcamClipDeletionRejected]). The gallery copy of
+/// the clip, if any, is the user's and stays. The session's telemetry file is
+/// shared by all its clips and stays.
+Future<DashcamClipDeletionOutcome> deleteDashcamClipByUser({
+  required String sessionId,
+  required String filePath,
+  DashcamClipFileOps fileOps = const DashcamClipFileOps(),
+}) {
+  void refuseIfControlled() {
+    final controlled = DrivingSessionRecorder.controllingState(sessionId);
+    if (controlled != null) {
+      throw DashcamClipDeletionRejected('deleteDashcamClipByUser($sessionId) rejected: the session is ${controlled.name}; nothing was removed.');
+    }
+  }
+
+  refuseIfControlled();
+  return runInClipIndexQueue(() async {
+    refuseIfControlled();
+    final name = dashcamClipBasename(filePath);
+    final record = Hive.box<DrivingSession>(HiveBoxNames.drivingSessions).get(sessionId);
+    if (record == null || record.deletionPending || sessionDeletionCommitted(sessionId)) return DashcamClipDeletionOutcome.notIndexed;
+    final raw = Hive.box(HiveBoxNames.dashcamSessionVideos).get(sessionId);
+    if (raw is! List) return DashcamClipDeletionOutcome.notIndexed;
+    final own = [
+      for (final entry in raw)
+        if (entry is DashcamClipRecord && dashcamClipBasename(entry.filePath) == name) entry,
+    ];
+    if (own.isEmpty) return DashcamClipDeletionOutcome.notIndexed;
+    final path = own.first.filePath;
+    final deleting = fileOps.delete(path);
+    try {
+      await deleting;
+    } on FileSystemException {
+      // Already gone, or failed: what is on disk decides, right below.
+    }
+    bool stillThere;
+    try {
+      stillThere = await fileOps.isOccupied(path);
+    } catch (_) {
+      stillThere = true;
+    }
+    if (stillThere) return DashcamClipDeletionOutcome.fileFailed;
+    try {
+      await _removeIndexEntry(sessionId, name);
+    } catch (_) {
+      return DashcamClipDeletionOutcome.entryFailed;
+    }
+    return DashcamClipDeletionOutcome.deleted;
+  });
 }
 
 bool _stillEvictable(_ClassifiedClip victim, Set<String> protectedInMemory, Set<String> immune) {
@@ -1082,8 +1169,7 @@ bool _stillEvictable(_ClassifiedClip victim, Set<String> protectedInMemory, Set<
   return own.length == 1 && !own.single.isProtected;
 }
 
-Future<void> _removeIndexEntry(DashcamClipDescriptor descriptor, String name) async {
-  final sessionId = descriptor.sessionId;
+Future<void> _removeIndexEntry(String sessionId, String name) async {
   if (sessionDeletionCommitted(sessionId)) return;
   final videos = Hive.box(HiveBoxNames.dashcamSessionVideos);
   final raw = videos.get(sessionId);
