@@ -271,3 +271,33 @@ PagePlacementResult placeAcrossPages({
 
   return (placed: placed, unplaced: unplaced);
 }
+
+/// The size a new widget is created with on [grid] — the same default
+/// [placeAcrossPages] uses — i.e. a widget's "original" size.
+({int width, int height}) defaultWidgetSize(GridDimensions grid) {
+  final bounds = universalBounds(grid);
+  return (
+    width: kDefaultCreateWidth.clamp(bounds.minWidth, bounds.maxWidth),
+    height: kDefaultCreateHeight.clamp(bounds.minHeight, bounds.maxHeight),
+  );
+}
+
+/// Whether [rect] already has [defaultWidgetSize].
+bool hasDefaultWidgetSize(CellRect rect, GridDimensions grid) {
+  final size = defaultWidgetSize(grid);
+  return rect.width == size.width && rect.height == size.height;
+}
+
+/// "Restaurar tamanho original" (2026-11-11): [current] back to
+/// [defaultWidgetSize], keeping its top-left corner — shifted left/up only as
+/// far as needed to stay on [grid]. `null` when that rect would overlap one of
+/// [others] (the other widgets on the same page): nothing is moved out of the
+/// way, the caller says there is no room. Shrinking never overlaps.
+CellRect? restoredDefaultRect({required CellRect current, required GridDimensions grid, required List<CellRect> others}) {
+  final size = defaultWidgetSize(grid);
+  final x = current.x.clamp(0, grid.columns - size.width);
+  final y = current.y.clamp(0, grid.rows - size.height);
+  final candidate = (x: x, y: y, width: size.width, height: size.height);
+  if (others.any((r) => r.overlaps(candidate))) return null;
+  return candidate;
+}

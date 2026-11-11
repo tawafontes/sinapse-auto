@@ -31,11 +31,16 @@ Future<void> showDashboardTileContextMenu({
   // site still passes a real callback.
   VoidCallback? onDelete,
   VoidCallback? onChangeStyle,
-  required VoidCallback onFullscreen,
+  // Nullable so the 5-second hold can show this same menu with nothing but
+  // "Restaurar tamanho original" (see DashboardTile.onLongHold) — every other
+  // call site passes it.
+  VoidCallback? onFullscreen,
   bool isFullscreen = false,
   VoidCallback? onResetRecords,
   String resetRecordsLabel = 'Resetar registros',
   IconData resetRecordsIcon = Icons.restart_alt,
+  // Only offered while the widget is not at its original (default) size.
+  VoidCallback? onResetSize,
 }) {
   return showModalBottomSheet<void>(
     context: context,
@@ -79,16 +84,23 @@ Future<void> showDashboardTileContextMenu({
                   title: const Text('Alterar o estilo'),
                   onTap: () => run(onChangeStyle),
                 ),
-              ListTile(
-                leading: Icon(isFullscreen ? Icons.fullscreen_exit : Icons.fullscreen),
-                title: Text(isFullscreen ? 'Sair da tela cheia' : 'Colocar em tela cheia'),
-                onTap: () => run(onFullscreen),
-              ),
+              if (onFullscreen != null)
+                ListTile(
+                  leading: Icon(isFullscreen ? Icons.fullscreen_exit : Icons.fullscreen),
+                  title: Text(isFullscreen ? 'Sair da tela cheia' : 'Colocar em tela cheia'),
+                  onTap: () => run(onFullscreen),
+                ),
               if (onResetRecords != null)
                 ListTile(
                   leading: Icon(resetRecordsIcon),
                   title: Text(resetRecordsLabel),
                   onTap: () => run(onResetRecords),
+                ),
+              if (onResetSize != null)
+                ListTile(
+                  leading: const Icon(Icons.photo_size_select_small),
+                  title: const Text('Restaurar tamanho original'),
+                  onTap: () => run(onResetSize),
                 ),
             ],
           ),

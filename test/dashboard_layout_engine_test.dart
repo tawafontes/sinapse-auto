@@ -305,4 +305,31 @@ void main() {
       expect(result.unplaced, [SensorType.inclination]);
     });
   });
+
+  group('restore original size (2026-11-11)', () {
+    const portrait = (columns: 4, rows: 6);
+    const landscape = (columns: 6, rows: 4);
+
+    test('the original size is the 2x2 a new widget gets', () {
+      expect(defaultWidgetSize(portrait), (width: 2, height: 2));
+      expect(defaultWidgetSize(landscape), (width: 2, height: 2));
+      expect(hasDefaultWidgetSize((x: 1, y: 3, width: 2, height: 2), portrait), isTrue);
+      expect(hasDefaultWidgetSize((x: 0, y: 0, width: 4, height: 2), portrait), isFalse);
+      expect(hasDefaultWidgetSize((x: 0, y: 0, width: 2, height: 3), portrait), isFalse);
+    });
+
+    test('restoring keeps the top-left corner', () {
+      expect(restoredDefaultRect(current: (x: 1, y: 2, width: 3, height: 4), grid: portrait, others: const []), (x: 1, y: 2, width: 2, height: 2));
+    });
+
+    test('a corner that would leave the grid is pulled back inside', () {
+      expect(restoredDefaultRect(current: (x: 3, y: 5, width: 1, height: 1), grid: portrait, others: const []), (x: 2, y: 4, width: 2, height: 2));
+    });
+
+    test('it never moves another widget: an overlap is refused (null)', () {
+      expect(restoredDefaultRect(current: (x: 0, y: 0, width: 1, height: 1), grid: portrait, others: const [(x: 1, y: 1, width: 2, height: 2)]), isNull);
+      expect(restoredDefaultRect(current: (x: 0, y: 0, width: 4, height: 4), grid: portrait, others: const [(x: 0, y: 4, width: 2, height: 2)]), (x: 0, y: 0, width: 2, height: 2),
+          reason: 'shrinking never overlaps');
+    });
+  });
 }

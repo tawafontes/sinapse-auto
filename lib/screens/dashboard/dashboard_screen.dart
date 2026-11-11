@@ -947,6 +947,49 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
+  /// "Restaurar tamanho original" for [config], or `null` while it already
+  /// has the default size (nothing to restore, so the option is not offered).
+  VoidCallback? _resetSizeActionFor(SensorWidgetConfig config) {
+    final grid = _lastGrid ?? gridDimensionsFor(MediaQuery.orientationOf(context));
+    if (hasDefaultWidgetSize(_rectOf(config), grid)) return null;
+    return () => _restoreDefaultSize(config, grid);
+  }
+
+  /// Back to the default size on the same page, keeping the top-left corner
+  /// (see [restoredDefaultRect]); saved like any resize ([_handleResized]).
+  /// Growing back into another widget is refused with a message.
+  void _restoreDefaultSize(SensorWidgetConfig config, GridDimensions grid) {
+    final others = [
+      for (final c in _configs)
+        if (c != config && c.page == config.page && c.position.x >= 0) _rectOf(c),
+    ];
+    final rect = restoredDefaultRect(current: _rectOf(config), grid: grid, others: others);
+    if (rect == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Não há espaço para restaurar o tamanho aqui — mova os widgets vizinhos e tente de novo.')),
+      );
+      return;
+    }
+    _handleResized(config, rect);
+  }
+
+  /// The 5-second hold on a tile ([DashboardTile.onLongHold]): the same
+  /// centralized menu, with only "Restaurar tamanho original" — offered only
+  /// when the widget is not at its default size (otherwise nothing happens:
+  /// the hold already put the tile in edit mode at the usual long-press
+  /// deadline). Edit mode ends first, so the handles do not stay up behind it.
+  Future<void> _showResetSizeMenu(SensorWidgetConfig config) async {
+    final resetSize = _resetSizeActionFor(config);
+    if (resetSize == null) return;
+    _exitEditMode();
+    await showDashboardTileContextMenu(
+      context: context,
+      icon: sensorTypeMetadata[config.sensorType]!.icon,
+      label: sensorTypeMetadata[config.sensorType]!.label,
+      onResetSize: resetSize,
+    );
+  }
+
   Future<void> _showContextMenu(SensorWidgetConfig config) {
     final params = _contextMenuParamsFor(config);
     return showDashboardTileContextMenu(
@@ -957,6 +1000,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       onChangeStyle: params.onChangeStyle,
       onFullscreen: () => _openFullscreen(config),
       onResetRecords: params.onResetRecords,
+      onResetSize: _resetSizeActionFor(config),
       resetRecordsLabel: params.resetRecordsLabel,
       resetRecordsIcon: params.resetRecordsIcon,
     );
@@ -1368,6 +1412,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       // Same rule as onTap: while anything is being edited, a touch on a tile
       // ends that edit session first — it never opens something on top of it.
       onDoubleTap: () => _editingConfig != null ? _exitEditMode() : _openFullscreen(config),
+      onLongHold: () => _showResetSizeMenu(config),
       onResizePreviewChanged: _setResizeGhost,
     );
   }

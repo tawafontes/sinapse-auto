@@ -423,6 +423,87 @@ void main() {
     expect(moved, isNull); // a handle drag resizes, never moves.
   });
 
+  group('5-second hold → onLongHold (2026-11-11)', () {
+    Widget holdTile({required VoidCallback onLongHold, ValueChanged<CellRect>? onMoved}) {
+      var editing = false;
+      return StatefulBuilder(
+        builder: (context, setState) => MaterialApp(
+          home: Scaffold(
+            body: Stack(
+              children: [
+                DashboardTile(
+                  rect: defaultRect,
+                  cellSize: cellSize,
+                  grid: grid,
+                  otherRects: const [],
+                  label: 'Velocidade',
+                  icon: Icons.speed,
+                  accentColor: Colors.blue,
+                  content: const SizedBox(),
+                  onMoved: onMoved ?? (_) {},
+                  onMoveStarted: () {},
+                  onMoveCandidate: (_) => true,
+                  onMoveCancelled: () {},
+                  onDragPositionUpdate: (_) {},
+                  onResized: (_) {},
+                  isEditing: editing,
+                  onTap: () {},
+                  onLongPress: () => setState(() => editing = true),
+                  onResizePreviewChanged: (_) {},
+                  onLongHold: onLongHold,
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
+    testWidgets('holding still for 5 s fires onLongHold once, while the finger is still down', (tester) async {
+      var holds = 0;
+      await tester.pumpWidget(holdTile(onLongHold: () => holds++));
+      final gesture = await tester.startGesture(const Offset(100, 100));
+      await tester.pump(kLongPressTimeout + kPressTimeout);
+      expect(holds, 0, reason: 'only edit mode at the usual long-press deadline');
+      await tester.pump(DashboardTile.longHoldDuration - kLongPressTimeout - const Duration(milliseconds: 200));
+      expect(holds, 0, reason: 'not before 5 s');
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(holds, 1);
+      await tester.pump(const Duration(seconds: 5));
+      expect(holds, 1, reason: 'once per hold');
+      await gesture.up();
+      await tester.pump();
+    });
+
+    testWidgets('lifting before 5 s fires nothing', (tester) async {
+      var holds = 0;
+      await tester.pumpWidget(holdTile(onLongHold: () => holds++));
+      final gesture = await tester.startGesture(const Offset(100, 100));
+      await tester.pump(const Duration(seconds: 3));
+      await gesture.up();
+      await tester.pump(const Duration(seconds: 5));
+      expect(holds, 0);
+    });
+
+    testWidgets('a hold that turns into a move fires nothing', (tester) async {
+      var holds = 0;
+      CellRect? moved;
+      await tester.pumpWidget(holdTile(onLongHold: () => holds++, onMoved: (r) => moved = r));
+      final gesture = await tester.startGesture(const Offset(100, 100));
+      await tester.pump(kLongPressTimeout + kPressTimeout);
+      for (var i = 0; i < 10; i++) {
+        await gesture.moveBy(const Offset(10, 0));
+        await tester.pump();
+      }
+      await tester.pump(const Duration(seconds: 6));
+      expect(holds, 0);
+      await gesture.up();
+      await tester.pump();
+      expect(moved, (x: 1, y: 0, width: 2, height: 2));
+      await tester.pump(const Duration(milliseconds: 400));
+    });
+  });
+
   group('press, hold and drag in one gesture (2026-11-11)', () {
     /// Like the dashboard: the long press itself enters edit mode.
     Widget editOnLongPress({required ValueChanged<CellRect> onMoved, VoidCallback? onMoveStarted}) {

@@ -113,8 +113,12 @@ class DashboardTile extends StatefulWidget {
     required this.onLongPress,
     required this.onResizePreviewChanged,
     this.onDoubleTap,
+    this.onLongHold,
     this.alertColor,
   });
+
+  /// How long the finger must stay down and still for [onLongHold].
+  static const Duration longHoldDuration = Duration(seconds: 5);
 
   final CellRect rect;
   final Size cellSize;
@@ -147,6 +151,12 @@ class DashboardTile extends StatefulWidget {
   /// Fired on a double-tap — see class doc. `null` keeps the double-tap
   /// recognized but inert.
   final VoidCallback? onDoubleTap;
+
+  /// Fired once the same press has stayed down, without starting a move, for
+  /// [longHoldDuration] — well past [onLongPress] (which enters edit mode at
+  /// the usual long-press deadline). The dashboard offers "Restaurar tamanho
+  /// original" there. Moving past touch slop or lifting earlier cancels it.
+  final VoidCallback? onLongHold;
 
   /// Fired once, the moment a move drag begins — before any candidate rect
   /// is ever proposed. Needed *in addition to* [onMoveCandidate]: a tile
@@ -380,6 +390,7 @@ class _DashboardTileState extends State<DashboardTile> with SingleTickerProvider
   @override
   void dispose() {
     _alertBlinkTimer?.cancel();
+    _longHoldTimer?.cancel();
     _dragOverlayEntry?.remove();
     _reflowController.dispose();
     super.dispose();
@@ -439,7 +450,27 @@ class _DashboardTileState extends State<DashboardTile> with SingleTickerProvider
   /// The move a long press turned into without lifting, see [_onLongPressMove].
   Drag? _longPressMove;
 
-  void _onLongPressStart(LongPressStartDetails details) => _longPressOrigin = details.globalPosition;
+  /// Counts down to [DashboardTile.onLongHold] from the long press's own
+  /// recognition (itself [kLongPressTimeout] after the finger went down), so
+  /// the total hold is [DashboardTile.longHoldDuration].
+  Timer? _longHoldTimer;
+
+  void _onLongPressStart(LongPressStartDetails details) {
+    _longPressOrigin = details.globalPosition;
+    _longHoldTimer?.cancel();
+    if (widget.onLongHold == null) return;
+    _longHoldTimer = Timer(DashboardTile.longHoldDuration - kLongPressTimeout, () {
+      _longHoldTimer = null;
+      if (!mounted || _longPressMove != null || _isDragging) return;
+      HapticFeedback.mediumImpact();
+      widget.onLongHold?.call();
+    });
+  }
+
+  void _cancelLongHold() {
+    _longHoldTimer?.cancel();
+    _longHoldTimer = null;
+  }
 
   /// Press, hold and drag in ONE gesture, as on the Android home screen
   /// (owner report, 2026-11-11: holding a widget showed the resize handles,
@@ -455,12 +486,14 @@ class _DashboardTileState extends State<DashboardTile> with SingleTickerProvider
     if (origin == null) return;
     if (_longPressMove == null) {
       if (_isDragging || (details.globalPosition - origin).distance < kTouchSlop) return;
+      _cancelLongHold(); // a move, not a hold
       _longPressMove = _onMoveDragStart(origin);
     }
     _onMoveDragUpdate(details.globalPosition);
   }
 
   void _onLongPressEnd(LongPressEndDetails details) {
+    _cancelLongHold();
     final move = _longPressMove;
     _longPressMove = null;
     _longPressOrigin = null;
@@ -468,6 +501,7 @@ class _DashboardTileState extends State<DashboardTile> with SingleTickerProvider
   }
 
   void _onLongPressCancel() {
+    _cancelLongHold();
     final move = _longPressMove;
     _longPressMove = null;
     _longPressOrigin = null;
