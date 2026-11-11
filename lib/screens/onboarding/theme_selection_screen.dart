@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../models/color_palette_metadata.dart';
 import '../../models/font_family_metadata.dart';
 import '../../models/theme_config.dart';
+import '../../services/sensor_widget_repository.dart';
 import '../../services/theme_controller.dart';
 import '../dashboard/dashboard_screen.dart';
 
@@ -30,6 +31,15 @@ class _ThemeSelectionScreenState extends State<ThemeSelectionScreen> {
 
   Future<void> _finish(BuildContext context) async {
     final controller = ThemeControllerScope.of(context);
+    // The first "Concluir" ends the onboarding (a persisted theme is what marks
+    // it done, see main.dart): the dashboard then opens with every widget
+    // instead of empty. Seeded BEFORE the commit, so a process death in
+    // between repeats the onboarding (and finds the widgets already there)
+    // rather than leaving an empty dashboard. Revisiting "Tema" later never
+    // re-adds a widget the user deleted.
+    if (!controller.isPersisted && SensorWidgetRepository.all.isEmpty) {
+      await SensorWidgetRepository.addDefaultWidgets();
+    }
     await controller.commit();
     _confirmed = true;
     if (!context.mounted) return;

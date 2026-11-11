@@ -79,9 +79,10 @@ class _PermissionsScreenState extends State<PermissionsScreen> {
   }
 
   void _continue() {
-    // Sensor/style selection moved out of first-run onboarding — a new user
-    // lands on an empty dashboard and adds tools later via its "+" button
-    // (or the Settings screen). Onboarding itself just needs a theme.
+    // Sensor/style selection moved out of first-run onboarding: the theme's
+    // "Concluir" fills the first dashboard with every widget in its default
+    // style (ThemeSelectionScreen), and the "+" button or Settings change it
+    // later. Onboarding itself just needs a theme.
     Navigator.of(context).push(
       MaterialPageRoute(builder: (_) => const ThemeSelectionScreen()),
     );

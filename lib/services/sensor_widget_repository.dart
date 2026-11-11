@@ -1,6 +1,7 @@
 import 'package:hive/hive.dart';
 
 import '../models/display_style_metadata.dart';
+import '../models/sensor_type_metadata.dart';
 import '../models/sensor_widget_config.dart';
 import 'hive_boxes.dart';
 
@@ -44,6 +45,19 @@ class SensorWidgetRepository {
           size: WidgetSize(width: 1, height: 1),
         ),
       );
+    }
+  }
+
+  /// The first-run dashboard: every sensor that has no widget yet gets one in
+  /// its default (first valid) style, unplaced — the dashboard places them on
+  /// its first frame, in [sensorTypeMetadata]'s order. Never touches an
+  /// existing widget. Called only when the first onboarding completes (see
+  /// `ThemeSelectionScreen`), so a widget the user deletes later stays deleted.
+  static Future<void> addDefaultWidgets() async {
+    for (final type in sensorTypeMetadata.keys) {
+      final styles = validDisplayStylesForSensor[type];
+      if (styles == null || styles.isEmpty || forSensor(type) != null) continue;
+      await upsertStyle(type, styles.first);
     }
   }
 
