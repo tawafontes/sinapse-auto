@@ -42,6 +42,9 @@ final SpringDescription kReflowSpring = SpringDescription.withDampingRatio(mass:
 ///  * Double-tap ([onDoubleTap]) — what it does is up to the parent (the
 ///    dashboard opens the tile in fullscreen). Recognized even without a
 ///    callback, so a double-tap never also fires [onTap].
+///  * Press-hold-and-drag in one gesture moves the tile too: once the long
+///    press entered edit mode, moving the same finger past touch slop drives
+///    the same move (see [_DashboardTileState._onLongPressMove]).
 ///  * Drag moves the tile — but *only* while [isEditing] is true, matching
 ///    the Android home-screen model (select first via long-press, then
 ///    move, as a separate, subsequent gesture). When
@@ -429,6 +432,48 @@ class _DashboardTileState extends State<DashboardTile> with SingleTickerProvider
     return _TileMoveDrag(onUpdate: _onMoveDragUpdate, onEnd: _commitMove, onCancel: _cancelMove);
   }
 
+  /// Where the finger was when the long press was recognized — set while
+  /// that same press is still down, see [_onLongPressMove].
+  Offset? _longPressOrigin;
+
+  /// The move a long press turned into without lifting, see [_onLongPressMove].
+  Drag? _longPressMove;
+
+  void _onLongPressStart(LongPressStartDetails details) => _longPressOrigin = details.globalPosition;
+
+  /// Press, hold and drag in ONE gesture, as on the Android home screen
+  /// (owner report, 2026-11-11: holding a widget showed the resize handles,
+  /// but dragging without lifting moved nothing — the move recognizer only
+  /// joins pointers that go down once editing). The long press has already
+  /// won the arena (entering edit mode via [widget.onLongPress]), so its own
+  /// post-acceptance moves drive the very same move [_onMoveDragStart]
+  /// starts for a separate drag — same cell snapping, reflow, edge page
+  /// switching and overlay — once the finger leaves [kTouchSlop], so a hold
+  /// that only wobbles is still just "enter edit mode".
+  void _onLongPressMove(LongPressMoveUpdateDetails details) {
+    final origin = _longPressOrigin;
+    if (origin == null) return;
+    if (_longPressMove == null) {
+      if (_isDragging || (details.globalPosition - origin).distance < kTouchSlop) return;
+      _longPressMove = _onMoveDragStart(origin);
+    }
+    _onMoveDragUpdate(details.globalPosition);
+  }
+
+  void _onLongPressEnd(LongPressEndDetails details) {
+    final move = _longPressMove;
+    _longPressMove = null;
+    _longPressOrigin = null;
+    move?.end(DragEndDetails());
+  }
+
+  void _onLongPressCancel() {
+    final move = _longPressMove;
+    _longPressMove = null;
+    _longPressOrigin = null;
+    move?.cancel();
+  }
+
   /// Promotes the tile's visuals into the app's [Overlay] for the rest of
   /// the drag — see [_dragOverlayEntry]'s doc for why. Must run before
   /// anything else has a chance to rebuild in response to [widget.onMoveStarted]
@@ -761,7 +806,12 @@ class _DashboardTileState extends State<DashboardTile> with SingleTickerProvider
               ),
               LongPressGestureRecognizer: GestureRecognizerFactoryWithHandlers<LongPressGestureRecognizer>(
                 LongPressGestureRecognizer.new,
-                (instance) => instance.onLongPress = widget.onLongPress,
+                (instance) => instance
+                  ..onLongPress = widget.onLongPress
+                  ..onLongPressStart = _onLongPressStart
+                  ..onLongPressMoveUpdate = _onLongPressMove
+                  ..onLongPressEnd = _onLongPressEnd
+                  ..onLongPressCancel = _onLongPressCancel,
               ),
               // Only present while editing — see the class doc for why this
               // must be an *absent* map entry (not a recognizer that's

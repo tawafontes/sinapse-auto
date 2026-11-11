@@ -422,4 +422,73 @@ void main() {
     expect(previews.last, isNull); // cleared once the gesture ends.
     expect(moved, isNull); // a handle drag resizes, never moves.
   });
+
+  group('press, hold and drag in one gesture (2026-11-11)', () {
+    /// Like the dashboard: the long press itself enters edit mode.
+    Widget editOnLongPress({required ValueChanged<CellRect> onMoved, VoidCallback? onMoveStarted}) {
+      var editing = false;
+      return StatefulBuilder(
+        builder: (context, setState) => buildTile(
+          isEditing: editing,
+          onLongPress: () => setState(() => editing = true),
+          onMoved: onMoved,
+          onMoveStarted: onMoveStarted,
+        ),
+      );
+    }
+
+    testWidgets('holding the tile and dragging without lifting moves it, committed on release', (tester) async {
+      CellRect? committed;
+      var started = 0;
+      await tester.pumpWidget(editOnLongPress(onMoved: (r) => committed = r, onMoveStarted: () => started++));
+
+      final gesture = await tester.startGesture(const Offset(100, 100));
+      await tester.pump(kLongPressTimeout + kPressTimeout);
+      expect(find.byKey(const ValueKey('resizeHandle_bottomRight')), findsOneWidget, reason: 'edit mode entered by the hold');
+
+      for (var i = 0; i < 10; i++) {
+        await gesture.moveBy(const Offset(10, 0));
+        await tester.pump();
+      }
+      expect(started, 1);
+      expect(committed, isNull, reason: 'not before release');
+
+      await gesture.up();
+      await tester.pump();
+      expect(committed, (x: 1, y: 0, width: 2, height: 2));
+      await tester.pump(const Duration(milliseconds: 400));
+    });
+
+    testWidgets('a hold that only wobbles within touch slop stays "enter edit mode" — no move', (tester) async {
+      CellRect? committed;
+      var started = 0;
+      await tester.pumpWidget(editOnLongPress(onMoved: (r) => committed = r, onMoveStarted: () => started++));
+
+      final gesture = await tester.startGesture(const Offset(100, 100));
+      await tester.pump(kLongPressTimeout + kPressTimeout);
+      await gesture.moveBy(const Offset(5, 3));
+      await tester.pump();
+      await gesture.up();
+      await tester.pump();
+
+      expect(started, 0);
+      expect(committed, isNull);
+      expect(find.byKey(const ValueKey('resizeHandle_bottomRight')), findsOneWidget, reason: 'still editing, handles shown');
+    });
+
+    testWidgets('the two-gesture way (hold, lift, then drag) still works', (tester) async {
+      CellRect? committed;
+      await tester.pumpWidget(editOnLongPress(onMoved: (r) => committed = r));
+
+      final hold = await tester.startGesture(const Offset(100, 100));
+      await tester.pump(kLongPressTimeout + kPressTimeout);
+      await hold.up();
+      await tester.pump();
+
+      await tester.drag(find.byType(DashboardTile), const Offset(100, 0));
+      await tester.pump();
+      expect(committed, (x: 1, y: 0, width: 2, height: 2));
+      await tester.pump(const Duration(milliseconds: 400));
+    });
+  });
 }
