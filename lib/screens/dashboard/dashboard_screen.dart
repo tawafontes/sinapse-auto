@@ -816,10 +816,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
     _cancelEdgeHover();
   }
 
+  /// The whole resized rect — position included. A left or top handle moves
+  /// the anchored edge's opposite side: growing from the left shifts `x` left
+  /// as the width grows (see `DashboardTile._candidateRect`). Keeping the old
+  /// position here (as this did until 2026-11-11, owner report) made a
+  /// left-handle resize grow to the RIGHT once released, unlike its preview.
   void _handleResized(SensorWidgetConfig config, CellRect rect) {
     SensorWidgetRepository.updateLayout(
       config,
-      position: config.position,
+      position: WidgetPosition(x: rect.x.toDouble(), y: rect.y.toDouble()),
       size: WidgetSize(width: rect.width.toDouble(), height: rect.height.toDouble()),
     );
     setState(() {});
