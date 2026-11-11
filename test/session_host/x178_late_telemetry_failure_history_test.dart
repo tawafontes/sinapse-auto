@@ -68,7 +68,7 @@ void main() {
             }
 
             Future<void> openHistory(int tiles) async {
-              await app.openSettings();
+              await app.openSessionScreen();
               await app.tapText('Histórico');
               await app.driveUntil(() => find.byType(Dismissible).evaluate().length == tiles, label: 'history lists $tiles session(s)');
               await app.drive(const Duration(milliseconds: 800)); // the route transition has finished

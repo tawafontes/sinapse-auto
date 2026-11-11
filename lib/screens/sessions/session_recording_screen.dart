@@ -7,6 +7,7 @@ import '../../services/dashcam_session_controller.dart';
 import '../../services/driving_session_recorder.dart';
 import '../../services/gnss_quality.dart';
 import '../../services/unit_preferences.dart';
+import 'session_history_screen.dart';
 
 /// Start/stop control for a driving session — reads/writes the shared
 /// [DrivingSessionRecorder] the caller already owns (never constructs its
@@ -135,6 +136,8 @@ class _SessionRecordingScreenState extends State<SessionRecordingScreen> {
                           icon: const Icon(Icons.play_arrow),
                           label: const Text('Iniciar sessão'),
                         ),
+                        const SizedBox(height: 16),
+                        const _HistoryButton(),
                       ],
                     )
                   : Column(
@@ -228,12 +231,30 @@ class _SessionRecordingScreenState extends State<SessionRecordingScreen> {
                             _ => 'Finalizar sessão',
                           }),
                         ),
+                        const SizedBox(height: 16),
+                        const _HistoryButton(),
                       ],
                     ),
             ),
           ),
         ),
       ),
+    );
+  }
+}
+
+/// The driving sessions' history lives with the sessions (moved here from the
+/// Settings menu, owner decision 2026-11-11) — offered in both states, so a
+/// past session can be reviewed while a new one records.
+class _HistoryButton extends StatelessWidget {
+  const _HistoryButton();
+
+  @override
+  Widget build(BuildContext context) {
+    return TextButton.icon(
+      onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const SessionHistoryScreen())),
+      icon: const Icon(Icons.history),
+      label: const Text('Histórico'),
     );
   }
 }

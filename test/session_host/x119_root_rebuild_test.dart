@@ -56,7 +56,7 @@ void main() {
           await app.drive(const Duration(milliseconds: 300));
           expectUnchanged('theme reverted');
 
-          await app.openSettings();
+          await app.openSessionScreen();
           await app.tapText('Histórico');
           await app.backToDashboard();
           expectUnchanged('History pushed and popped');

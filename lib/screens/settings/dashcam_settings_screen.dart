@@ -3,6 +3,7 @@ import 'package:permission_handler/permission_handler.dart';
 
 import '../../models/dashcam_config.dart';
 import '../../services/dashcam_preferences.dart';
+import '../sessions/dashcam_recordings_screen.dart';
 
 /// Dashcam configuration (Fase 15) — reads/writes [DashcamPreferencesScope],
 /// mirroring `PowerProfileScreen`/`UnitsScreen`'s existing settings-screen
@@ -44,6 +45,16 @@ class DashcamSettingsScreen extends StatelessWidget {
       body: SafeArea(
         child: ListView(
           children: [
+            // The recordings live with the dashcam (moved here from the
+            // Settings menu, owner decision 2026-11-11).
+            ListTile(
+              leading: const Icon(Icons.video_library_outlined),
+              title: const Text('Gravações'),
+              subtitle: const Text('Assistir e excluir os vídeos gravados'),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const DashcamRecordingsScreen())),
+            ),
+            const Divider(),
             SwitchListTile(
               title: const Text('Dashcam'),
               subtitle: const Text('Grava vídeo durante as sessões de condução, sincronizado com a telemetria.'),

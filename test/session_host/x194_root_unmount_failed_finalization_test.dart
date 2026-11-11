@@ -146,7 +146,7 @@ void main() {
             await app.drive(const Duration(milliseconds: 300));
             await app.driveUntil(() => app.dashboardCount() == 1, label: 'dashboard mounted again');
             expect(app.host, isNot(same(host)), reason: 'setup: a new host');
-            await app.openSettings();
+            await app.openSessionScreen();
             await app.tapText('Histórico');
             await app.driveUntil(() => sessionTiles().length == 1, label: 'the History lists A');
             await app.drive(const Duration(milliseconds: 800)); // the route transition has finished
