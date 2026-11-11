@@ -3,14 +3,10 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show HapticFeedback;
 
-import '../../models/alert_event.dart';
-import '../../models/alert_type.dart';
 import '../../models/color_palette_metadata.dart';
-import '../../models/detected_event.dart';
 import '../../models/display_style_metadata.dart';
 import '../../models/sensor_type_metadata.dart';
 import '../../models/sensor_widget_config.dart';
-import '../../services/alert_preferences.dart';
 import '../../services/app_settings.dart';
 import '../../services/dashboard_layout_engine.dart';
 import '../../services/dashboard_maintenance_service.dart';
@@ -208,9 +204,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
   DrivingSessionHost? _host;
   DrivingSessionHost get _session => _host!;
 
-  /// This view's own banner subscriptions to the host's engines.
-  StreamSubscription<AlertEvent>? _alertSub;
-  StreamSubscription<DetectedEvent>? _eventSub;
   late final PageController _pageController;
   late List<SensorWidgetConfig> _configs;
   late int _currentPage;
@@ -310,65 +303,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   // DrivingSessionScope (per its own InheritedWidget contract) isn't safe to
   // read from initState — resolved exactly once, on the first dependency pass.
-  // Only this screen's banners are subscribed here; recording events into the
-  // session is the host's job, done once however many dashboards are mounted.
+  // Recording events into the session is the host's job, done once however
+  // many dashboards are mounted. This screen used to show every alert as a
+  // red SnackBar at the bottom; the owner removed it as unnecessary
+  // (2026-11-11) — the alerts are still detected and recorded in the
+  // session, and each widget still shows its own alert color.
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    if (_host == null) {
-      final host = DrivingSessionScope.of(context);
-      _host = host;
-      _alertSub = host.alertEngine.events.listen(_handleAlertEvent);
-      _eventSub = host.eventEngine.events.listen(_handleDetectedEvent);
-    }
-  }
-
-  /// The one place any alert is actually shown — a brief [SnackBar], the
-  /// same mechanism regardless of which [AlertType] fired, so no widget or
-  /// screen needs its own alert-display logic. Only a *new* fire shows
-  /// anything; a clear is silent (a disappearing banner reads as more
-  /// alarming than informative for something like "speed dropped back
-  /// below the threshold"). Covers only the two types [AlertEngine] itself
-  /// still detects (`highInclination`/`weakGnss`) — see that class's doc.
-  void _handleAlertEvent(AlertEvent event) {
-    if (!event.active || !mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(alertTypeLabel(event.type)),
-        backgroundColor: Theme.of(context).colorScheme.error,
-        duration: const Duration(seconds: 4),
-      ),
-    );
-  }
-
-  /// Every confirmed [DetectedEvent] always gets persisted to the active
-  /// session, unconditionally — an event belongs in driving history
-  /// regardless of whether the user currently wants a live interruption for
-  /// it. Since Fase 16.2-R4.3-R2.6.8 that persistence is
-  /// [DrivingSessionHost]'s, not this screen's (two dashboards mounted during
-  /// a recreation would otherwise record it twice). Here, if this event's
-  /// type has a live-banner equivalent (see [alertTypeForDetectedEvent]) and
-  /// the user hasn't disabled it, the same [SnackBar] mechanism
-  /// [_handleAlertEvent] uses shows it — one confirmed event, at most one
-  /// visible effect, never two independently-timed decisions about the same
-  /// real-world moment (Fase 13.1 §1/§2).
-  void _handleDetectedEvent(DetectedEvent event) {
-    final alertType = alertTypeForDetectedEvent(event.type);
-    if (alertType == null || !mounted) return;
-    // Level-based delegated types (acceleration/braking/cornering/
-    // resultantG/speed) already gate on `isEnabled` inside
-    // EventDetectionEngine's own tracker before ever emitting — this check
-    // is what's actually load-bearing for `gnssLost`, whose tracker is
-    // unconditional by design (a GNSS-loss session record should always be
-    // recorded; only the live banner should honor the user's toggle).
-    if (!AlertPreferencesScope.of(context).isEnabled(alertType)) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(alertTypeLabel(alertType)),
-        backgroundColor: Theme.of(context).colorScheme.error,
-        duration: const Duration(seconds: 4),
-      ),
-    );
+    _host ??= DrivingSessionScope.of(context);
   }
 
   int _clampPage(int page) => page < 0 ? 0 : (page > _maxPages - 1 ? _maxPages - 1 : page);
@@ -395,8 +338,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
   void dispose() {
     _edgeHoverTimer?.cancel();
     _pageController.dispose();
-    _alertSub?.cancel();
-    _eventSub?.cancel();
     super.dispose();
   }
 
