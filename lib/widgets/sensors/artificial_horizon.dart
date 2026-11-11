@@ -58,7 +58,6 @@ _RiskColors _riskColorsFor(Brightness brightness) {
   );
 }
 
-@visibleForTesting
 Color riskZoneColor(InclinationRiskZone zone, Brightness brightness) {
   final colors = _riskColorsFor(brightness);
   switch (zone) {

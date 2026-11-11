@@ -2,11 +2,14 @@ import 'package:flutter/material.dart';
 
 import '../../models/alert_type.dart';
 import '../../services/alert_preferences.dart';
+import '../../services/dashboard_alerts.dart' show configurableAlertTypes;
 
 /// Enable/disable each alert and, for the ones with a numeric threshold,
 /// adjust it — reads/writes [AlertPreferencesScope], the same reactive
 /// source [AlertEngine] consumes, so a change here takes effect on the
-/// very next telemetry sample, no restart needed.
+/// very next telemetry sample, no restart needed. An enabled alert makes its
+/// dashboard widget blink (see `dashboard_alerts.dart`); the GNSS alerts are
+/// not offered (see [configurableAlertTypes]).
 class AlertsScreen extends StatelessWidget {
   const AlertsScreen({super.key});
 
@@ -17,7 +20,7 @@ class AlertsScreen extends StatelessWidget {
       appBar: AppBar(title: const Text('Alertas')),
       body: SafeArea(
         child: ListView(
-          children: AlertType.values.map((type) => _AlertTile(type: type, prefs: prefs)).toList(),
+          children: configurableAlertTypes.map((type) => _AlertTile(type: type, prefs: prefs)).toList(),
         ),
       ),
     );

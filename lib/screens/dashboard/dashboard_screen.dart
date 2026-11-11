@@ -3,11 +3,15 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show HapticFeedback;
 
+import '../../models/alert_type.dart';
 import '../../models/color_palette_metadata.dart';
+import '../../models/detected_event.dart';
 import '../../models/display_style_metadata.dart';
 import '../../models/sensor_type_metadata.dart';
 import '../../models/sensor_widget_config.dart';
+import '../../services/alert_preferences.dart';
 import '../../services/app_settings.dart';
+import '../../services/dashboard_alerts.dart';
 import '../../services/dashboard_layout_engine.dart';
 import '../../services/dashboard_maintenance_service.dart';
 import '../../services/driving_session_host.dart';
@@ -214,6 +218,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
   /// horizon, via [buildDashboardSensorWidget]'s `onAlertColorChanged`).
   final Map<SensorType, Color?> _alertColors = {};
 
+  /// Per-sensor blink of a confirmed alert event ([_handleDetectedEvent]),
+  /// each held for [dashboardEventAlertHold] by its own timer.
+  final Map<SensorType, Color> _eventAlertColors = {};
+  final Map<SensorType, Timer> _eventAlertTimers = {};
+  StreamSubscription<DetectedEvent>? _eventSub;
+
   /// Per-sensor "reset records" trigger, captured once each sensor widget
   /// registers itself via `onResetRequested` — only present for the three
   /// styles with a resettable record (line chart, G-force meter, artificial
@@ -305,13 +315,50 @@ class _DashboardScreenState extends State<DashboardScreen> {
   // read from initState — resolved exactly once, on the first dependency pass.
   // Recording events into the session is the host's job, done once however
   // many dashboards are mounted. This screen used to show every alert as a
-  // red SnackBar at the bottom; the owner removed it as unnecessary
-  // (2026-11-11) — the alerts are still detected and recorded in the
-  // session, and each widget still shows its own alert color.
+  // red SnackBar at the bottom; the owner replaced it (2026-11-11) with the
+  // alerted widget's own card blinking — see [_handleDetectedEvent].
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    _host ??= DrivingSessionScope.of(context);
+    if (_host == null) {
+      final host = DrivingSessionScope.of(context);
+      _host = host;
+      _eventSub = host.eventEngine.events.listen(_handleDetectedEvent);
+    }
+  }
+
+  /// A confirmed alert of [EventDetectionEngine] — the one detector, already
+  /// gated by the user's "Alertas" toggles and thresholds — makes the card of
+  /// the widget that measures it blink in its severity's color for
+  /// [dashboardEventAlertHold] (see `dashboard_alerts.dart`). A later event on
+  /// the same card replaces the color and restarts the hold. An event whose
+  /// widget is not on the dashboard shows nothing (it is still recorded in
+  /// the session by the host).
+  void _handleDetectedEvent(DetectedEvent event) {
+    if (!mounted) return;
+    final tile = dashboardTileForDetectedEvent(event.type);
+    final alertType = alertTypeForDetectedEvent(event.type);
+    if (tile == null || alertType == null) return;
+    if (!AlertPreferencesScope.of(context).isEnabled(alertType)) return;
+    final color = dashboardAlertColor(event.severity, Theme.of(context).brightness);
+    if (color == null) return;
+    _eventAlertTimers[tile]?.cancel();
+    _eventAlertTimers[tile] = Timer(dashboardEventAlertHold, () {
+      _eventAlertTimers.remove(tile);
+      if (mounted) setState(() => _eventAlertColors.remove(tile));
+    });
+    setState(() => _eventAlertColors[tile] = color);
+  }
+
+  /// What a card blinks in: a confirmed alert event first, else the color its
+  /// own widget reports (the inclination's risk zones) — the latter only while
+  /// "Inclinação elevada" is enabled in "Alertas", so every blink on the
+  /// dashboard follows the user's choice there.
+  Color? _tileAlertColor(SensorType type) {
+    final event = _eventAlertColors[type];
+    if (event != null) return event;
+    if (type == SensorType.inclination && !AlertPreferencesScope.of(context).isEnabled(AlertType.highInclination)) return null;
+    return _alertColors[type];
   }
 
   int _clampPage(int page) => page < 0 ? 0 : (page > _maxPages - 1 ? _maxPages - 1 : page);
@@ -338,6 +385,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
   void dispose() {
     _edgeHoverTimer?.cancel();
     _pageController.dispose();
+    _eventSub?.cancel();
+    for (final timer in _eventAlertTimers.values) {
+      timer.cancel();
+    }
     super.dispose();
   }
 
@@ -1299,7 +1350,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       onMoveCancelled: _handleMoveCancelled,
       onDragPositionUpdate: _handleDragGlobalPosition,
       onResized: (rect) => _handleResized(config, rect),
-      alertColor: _alertColors[config.sensorType],
+      alertColor: _tileAlertColor(config.sensorType),
       isEditing: _editingConfig == config,
       // While any tile is being edited, a tap anywhere — this same tile, a
       // different one, or empty space (see _buildPageGrid's background
