@@ -1367,6 +1367,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
       // opening the context menu.
       onTap: () => _editingConfig != null ? _exitEditMode() : _showContextMenu(config),
       onLongPress: () => _enterEditMode(config),
+      // Same rule as onTap: while anything is being edited, a touch on a tile
+      // ends that edit session first — it never opens something on top of it.
+      onDoubleTap: () => _editingConfig != null ? _exitEditMode() : _openFullscreen(config),
       onResizePreviewChanged: _setResizeGhost,
     );
   }

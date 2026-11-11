@@ -1,7 +1,16 @@
+import 'package:flutter/gestures.dart' show kDoubleTapTimeout;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:synapse_auto/screens/dashboard/sensor_fullscreen_screen.dart';
+
+/// A single tap on the instrument. The screen also recognizes a double-tap
+/// (back to the dashboard), so a single tap only counts once the double-tap
+/// window has passed with no second tap — the same wait a real finger gets.
+Future<void> tapContent(WidgetTester tester) async {
+  await tester.tap(find.text('conteúdo do sensor'));
+  await tester.pump(kDoubleTapTimeout + const Duration(milliseconds: 1));
+}
 
 void main() {
   Future<void> pumpFullscreen(
@@ -9,6 +18,7 @@ void main() {
     VoidCallback? onDelete,
     VoidCallback? onChangeStyle,
     VoidCallback? onResetRecords,
+    Future<bool> Function(BuildContext context)? confirmExit,
   }) async {
     await tester.pumpWidget(
       MaterialApp(
@@ -26,6 +36,7 @@ void main() {
                         onDelete: onDelete ?? () {},
                         onChangeStyle: onChangeStyle,
                         onResetRecords: onResetRecords,
+                        confirmExit: confirmExit,
                       ),
                     ),
                   ),
@@ -52,7 +63,7 @@ void main() {
   testWidgets('a tap reveals the controls (label becomes visible)', (tester) async {
     await pumpFullscreen(tester);
 
-    await tester.tap(find.text('conteúdo do sensor'));
+    await tapContent(tester);
     await tester.pumpAndSettle();
 
     final topBarOpacity = tester.widget<AnimatedOpacity>(find.byType(AnimatedOpacity));
@@ -63,7 +74,7 @@ void main() {
   testWidgets('controls auto-hide after the timeout with no further interaction', (tester) async {
     await pumpFullscreen(tester);
 
-    await tester.tap(find.text('conteúdo do sensor'));
+    await tapContent(tester);
     await tester.pump();
     expect(tester.widget<AnimatedOpacity>(find.byType(AnimatedOpacity)).opacity, 1);
 
@@ -76,11 +87,11 @@ void main() {
   ) async {
     await pumpFullscreen(tester);
 
-    await tester.tap(find.text('conteúdo do sensor'));
+    await tapContent(tester);
     await tester.pump();
     expect(tester.widget<AnimatedOpacity>(find.byType(AnimatedOpacity)).opacity, 1);
 
-    await tester.tap(find.text('conteúdo do sensor'));
+    await tapContent(tester);
     await tester.pump();
     expect(tester.widget<AnimatedOpacity>(find.byType(AnimatedOpacity)).opacity, 0);
   });
@@ -90,11 +101,11 @@ void main() {
   ) async {
     await pumpFullscreen(tester);
 
-    await tester.tap(find.text('conteúdo do sensor'));
+    await tapContent(tester);
     await tester.pump(const Duration(seconds: 3, milliseconds: 100));
     expect(tester.widget<AnimatedOpacity>(find.byType(AnimatedOpacity)).opacity, 0);
 
-    await tester.tap(find.text('conteúdo do sensor'));
+    await tapContent(tester);
     await tester.pump();
     expect(tester.widget<AnimatedOpacity>(find.byType(AnimatedOpacity)).opacity, 1);
 
@@ -109,7 +120,7 @@ void main() {
     tester,
   ) async {
     await pumpFullscreen(tester);
-    await tester.tap(find.text('conteúdo do sensor'));
+    await tapContent(tester);
     await tester.pumpAndSettle();
 
     await tester.tap(find.byIcon(Icons.more_vert));
@@ -121,7 +132,7 @@ void main() {
 
   testWidgets('selecting "Sair da tela cheia" pops back to the Dashboard', (tester) async {
     await pumpFullscreen(tester);
-    await tester.tap(find.text('conteúdo do sensor'));
+    await tapContent(tester);
     await tester.pumpAndSettle();
     await tester.tap(find.byIcon(Icons.more_vert));
     await tester.pumpAndSettle();
@@ -135,7 +146,7 @@ void main() {
 
   testWidgets('the back button in the top bar also pops back to the Dashboard', (tester) async {
     await pumpFullscreen(tester);
-    await tester.tap(find.text('conteúdo do sensor'));
+    await tapContent(tester);
     await tester.pumpAndSettle();
 
     await tester.tap(find.byIcon(Icons.arrow_back));
@@ -147,7 +158,7 @@ void main() {
   testWidgets('deleting from the fullscreen menu runs onDelete and pops back to the Dashboard', (tester) async {
     var deleted = false;
     await pumpFullscreen(tester, onDelete: () => deleted = true);
-    await tester.tap(find.text('conteúdo do sensor'));
+    await tapContent(tester);
     await tester.pumpAndSettle();
     await tester.tap(find.byIcon(Icons.more_vert));
     await tester.pumpAndSettle();
@@ -164,7 +175,7 @@ void main() {
   ) async {
     var reset = false;
     await pumpFullscreen(tester, onResetRecords: () => reset = true);
-    await tester.tap(find.text('conteúdo do sensor'));
+    await tapContent(tester);
     await tester.pumpAndSettle();
     await tester.tap(find.byIcon(Icons.more_vert));
     await tester.pumpAndSettle();
@@ -191,7 +202,7 @@ void main() {
 
     // Reveal the controls first — the back button is hidden (and
     // untappable, via IgnorePointer) until then.
-    await tester.tap(find.text('conteúdo do sensor'));
+    await tapContent(tester);
     await tester.pumpAndSettle();
 
     // Pop back to the Dashboard (via the back button) — dispose() must
@@ -219,7 +230,7 @@ void main() {
       // matching how this file's own earlier "back button" test already
       // does it.
       Future<void> backViaTopBar() async {
-        await tester.tap(find.text('conteúdo do sensor'));
+        await tapContent(tester);
         await tester.pumpAndSettle();
         await tester.tap(find.byIcon(Icons.arrow_back));
         await tester.pumpAndSettle();
@@ -252,4 +263,70 @@ void main() {
       expect(tester.takeException(), isNull);
     },
   );
+
+  Future<void> doubleTapContent(WidgetTester tester) async {
+    await tester.tap(find.text('conteúdo do sensor'));
+    await tester.pump(const Duration(milliseconds: 50));
+    await tester.tap(find.text('conteúdo do sensor'));
+    await tester.pumpAndSettle();
+  }
+
+  testWidgets('a double-tap on the instrument returns to the dashboard (no controls shown first)', (tester) async {
+    await pumpFullscreen(tester);
+    await doubleTapContent(tester);
+
+    expect(find.text('abrir tela cheia'), findsOneWidget);
+    expect(find.text('conteúdo do sensor'), findsNothing);
+  });
+
+  testWidgets('a double-tap asks confirmExit first: false stays, true leaves', (tester) async {
+    var answer = false;
+    var asked = 0;
+    await pumpFullscreen(
+      tester,
+      confirmExit: (context) async {
+        asked++;
+        return answer;
+      },
+    );
+
+    await doubleTapContent(tester);
+    expect(asked, 1);
+    expect(find.text('conteúdo do sensor'), findsOneWidget, reason: 'refused: still in fullscreen');
+
+    answer = true;
+    await doubleTapContent(tester);
+    expect(asked, 2);
+    expect(find.text('abrir tela cheia'), findsOneWidget, reason: 'confirmed: back on the dashboard');
+  });
+
+  testWidgets('a long-press opens the calibrate/reset action only — no delete or style there', (tester) async {
+    var resets = 0;
+    await pumpFullscreen(tester, onResetRecords: () => resets++, onChangeStyle: () {});
+
+    await tester.longPress(find.text('conteúdo do sensor'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Resetar registros'), findsOneWidget);
+    expect(find.text('Sair da tela cheia'), findsOneWidget);
+    expect(find.text('Excluir'), findsNothing);
+    expect(find.text('Alterar o estilo'), findsNothing);
+
+    await tester.tap(find.text('Resetar registros'));
+    await tester.pumpAndSettle();
+    expect(resets, 1);
+    expect(find.text('conteúdo do sensor'), findsOneWidget, reason: 'resetting never leaves the screen');
+  });
+
+  testWidgets('the top bar buttons answer at once — the instrument\'s double-tap window never delays them', (tester) async {
+    await pumpFullscreen(tester);
+    await tapContent(tester);
+
+    // No time advanced after the tap: a double-tap recognizer above the bar
+    // would still be holding the arena here, and the pop would not start.
+    await tester.tap(find.byIcon(Icons.arrow_back));
+    await tester.pump();
+    await tester.pumpAndSettle();
+    expect(find.text('abrir tela cheia'), findsOneWidget);
+  });
 }

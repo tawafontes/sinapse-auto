@@ -39,7 +39,9 @@ final SpringDescription kReflowSpring = SpringDescription.withDampingRatio(mass:
 ///    dashboard-wide is being edited. While any tile is in edit mode, a tap
 ///    on this tile instead ends that edit session (the parent decides which
 ///    behavior [onTap] means; this widget has no opinion either way).
-///  * Double-tap is recognized but intentionally does nothing (reserved).
+///  * Double-tap ([onDoubleTap]) — what it does is up to the parent (the
+///    dashboard opens the tile in fullscreen). Recognized even without a
+///    callback, so a double-tap never also fires [onTap].
 ///  * Drag moves the tile — but *only* while [isEditing] is true, matching
 ///    the Android home-screen model (select first via long-press, then
 ///    move, as a separate, subsequent gesture). When
@@ -107,6 +109,7 @@ class DashboardTile extends StatefulWidget {
     required this.onTap,
     required this.onLongPress,
     required this.onResizePreviewChanged,
+    this.onDoubleTap,
     this.alertColor,
   });
 
@@ -137,6 +140,10 @@ class DashboardTile extends StatefulWidget {
   /// handles) for this tile. Movement during the hold is impossible by
   /// construction (see class doc), so this never competes with a drag.
   final VoidCallback onLongPress;
+
+  /// Fired on a double-tap — see class doc. `null` keeps the double-tap
+  /// recognized but inert.
+  final VoidCallback? onDoubleTap;
 
   /// Fired once, the moment a move drag begins — before any candidate rect
   /// is ever proposed. Needed *in addition to* [onMoveCandidate]: a tile
@@ -749,8 +756,8 @@ class _DashboardTileState extends State<DashboardTile> with SingleTickerProvider
               ),
               DoubleTapGestureRecognizer: GestureRecognizerFactoryWithHandlers<DoubleTapGestureRecognizer>(
                 DoubleTapGestureRecognizer.new,
-                // Recognized so a double-tap doesn't also fire onTap; intentionally inert (reserved).
-                (instance) => instance.onDoubleTap = () {},
+                // Always recognized, so a double-tap never also fires onTap.
+                (instance) => instance.onDoubleTap = widget.onDoubleTap ?? () {},
               ),
               LongPressGestureRecognizer: GestureRecognizerFactoryWithHandlers<LongPressGestureRecognizer>(
                 LongPressGestureRecognizer.new,

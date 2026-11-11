@@ -21,7 +21,9 @@ import '../../widgets/dashboard/dashboard_tile_context_menu.dart';
 /// API. A single tap anywhere reveals a temporary top bar (back, label,
 /// options) that auto-hides again after [_controlsAutoHideDuration] of no
 /// interaction, or immediately on another tap while visible — see
-/// [_ControlsVisibility] for that whole mechanism.
+/// [_ControlsVisibility] for that whole mechanism. A double-tap returns to
+/// the dashboard ([confirmExit] may ask first), and a long-press opens the
+/// instrument's calibrate/reset action (see `_showQuickActions`).
 ///
 /// [onDelete]/[onChangeStyle]/[onResetRecords] mirror the exact callbacks
 /// the Dashboard tile's own long-press menu already uses (see
@@ -43,7 +45,13 @@ class SensorFullscreenScreen extends StatefulWidget {
     this.onResetRecords,
     this.resetRecordsLabel = 'Resetar registros',
     this.resetRecordsIcon = Icons.restart_alt,
+    this.confirmExit,
   });
+
+  /// Asked on a double-tap before returning to the dashboard — `true` leaves.
+  /// `null` leaves right away. The dashcam uses it to offer ending a recording
+  /// first ("Deseja encerrar a gravação?").
+  final Future<bool> Function(BuildContext context)? confirmExit;
 
   final String label;
   final IconData icon;
@@ -116,6 +124,32 @@ class _SensorFullscreenScreenState extends State<SensorFullscreenScreen> {
     }
   }
 
+  /// Double-tap anywhere: back to the dashboard, as it was — after
+  /// [SensorFullscreenScreen.confirmExit] agrees, when there is one.
+  Future<void> _handleDoubleTap() async {
+    final confirmExit = widget.confirmExit;
+    if (confirmExit != null && !await confirmExit(context)) return;
+    if (mounted) Navigator.of(context).pop();
+  }
+
+  /// Long-press anywhere: the instrument's own quick action — calibrate,
+  /// reset its records, or protect the current clip for the dashcam — in the
+  /// SAME centralized menu the options button opens, trimmed to that action
+  /// (plus "Sair da tela cheia"). Delete/style stay behind the options button.
+  Future<void> _showQuickActions() async {
+    _hideControls();
+    await showDashboardTileContextMenu(
+      context: context,
+      icon: widget.icon,
+      label: widget.label,
+      onFullscreen: () => Navigator.of(context).pop(),
+      isFullscreen: true,
+      onResetRecords: widget.onResetRecords,
+      resetRecordsLabel: widget.resetRecordsLabel,
+      resetRecordsIcon: widget.resetRecordsIcon,
+    );
+  }
+
   Future<void> _showOptions() async {
     // Pausing the auto-hide timer while the (modal) options sheet is open
     // isn't needed: showModalBottomSheet's own barrier already captures
@@ -153,30 +187,45 @@ class _SensorFullscreenScreenState extends State<SensorFullscreenScreen> {
     final colorScheme = Theme.of(context).colorScheme;
     return Scaffold(
       backgroundColor: colorScheme.surface,
-      body: GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onTap: _handleTap,
-        child: Stack(
-          children: [
-            // The instrument itself: the only permanent element, using the
-            // full available area (SafeArea still applied so it's never
-            // drawn under a display cutout, even with the system bars
-            // hidden) — every sensor widget already scales its own content
-            // to whatever space it's given (LayoutBuilder-based internally),
-            // so no fixed sizing is introduced here.
-            Positioned.fill(child: SafeArea(child: Padding(padding: const EdgeInsets.all(16), child: widget.content))),
-            Positioned(
-              top: 0,
-              left: 0,
-              right: 0,
-              child: AnimatedOpacity(
-                opacity: _controlsVisible ? 1 : 0,
-                duration: _controlsFadeDuration,
-                child: IgnorePointer(ignoring: !_controlsVisible, child: _TopBar(label: widget.label, icon: widget.icon, onOptions: _showOptions)),
+      body: Stack(
+        children: [
+          // The instrument itself: the only permanent element, using the
+          // full available area (SafeArea still applied so it's never
+          // drawn under a display cutout, even with the system bars
+          // hidden) — every sensor widget already scales its own content
+          // to whatever space it's given (LayoutBuilder-based internally),
+          // so no fixed sizing is introduced here.
+          //
+          // The gestures wrap the instrument only, NOT the top bar: a
+          // double-tap recognizer holds the gesture arena for the whole
+          // double-tap window after a first tap, so as an ancestor of the bar
+          // it would delay its back/options buttons by that window. Hidden,
+          // the bar ignores pointers, so a touch there still lands here.
+          Positioned.fill(
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: _handleTap,
+              onDoubleTap: _handleDoubleTap,
+              onLongPress: _showQuickActions,
+              child: SafeArea(
+                child: Padding(padding: const EdgeInsets.all(16), child: widget.content),
               ),
             ),
-          ],
-        ),
+          ),
+          Positioned(
+            top: 0,
+            left: 0,
+            right: 0,
+            child: AnimatedOpacity(
+              opacity: _controlsVisible ? 1 : 0,
+              duration: _controlsFadeDuration,
+              child: IgnorePointer(
+                ignoring: !_controlsVisible,
+                child: _TopBar(label: widget.label, icon: widget.icon, onOptions: _showOptions),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }

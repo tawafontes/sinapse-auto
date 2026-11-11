@@ -69,12 +69,49 @@ void main() {
       expect(hasAnyResizeHandle(tester), isFalse, reason: 'edit mode must be over, not switched to tile1');
     },
   );
+
+  Future<void> doubleTap(WidgetTester tester, Finder finder) async {
+    await tester.tap(finder);
+    await tester.pump(const Duration(milliseconds: 50));
+    await tester.tap(finder);
+    await tester.pump(const Duration(milliseconds: 400));
+  }
+
+  testWidgets('a double-tap opens the tile in fullscreen — and never its context menu', (tester) async {
+    final opened = <int>[];
+    final fullscreen = <int>[];
+    await tester.pumpWidget(_Harness(onMenuOpened: opened.add, onFullscreenOpened: fullscreen.add));
+
+    await doubleTap(tester, find.byKey(const ValueKey('tile1')));
+
+    expect(fullscreen, [1]);
+    expect(opened, isEmpty, reason: 'the double-tap is not also two taps');
+  });
+
+  testWidgets('a double-tap while a tile is being edited only ends the edit session', (tester) async {
+    final opened = <int>[];
+    final fullscreen = <int>[];
+    await tester.pumpWidget(_Harness(onMenuOpened: opened.add, onFullscreenOpened: fullscreen.add));
+
+    final gesture = await tester.startGesture(tester.getCenter(find.byKey(const ValueKey('tile0'))));
+    await tester.pump(kLongPressTimeout + kPressTimeout);
+    await gesture.up();
+    await tester.pump();
+    expect(hasAnyResizeHandle(tester), isTrue);
+
+    await doubleTap(tester, find.byKey(const ValueKey('tile1')));
+
+    expect(fullscreen, isEmpty);
+    expect(opened, isEmpty);
+    expect(hasAnyResizeHandle(tester), isFalse);
+  });
 }
 
 class _Harness extends StatefulWidget {
-  const _Harness({required this.onMenuOpened});
+  const _Harness({required this.onMenuOpened, this.onFullscreenOpened});
 
   final ValueChanged<int> onMenuOpened;
+  final ValueChanged<int>? onFullscreenOpened;
 
   @override
   State<_Harness> createState() => _HarnessState();
@@ -120,6 +157,7 @@ class _HarnessState extends State<_Harness> {
                 // dashboard_screen.dart's _buildPageGrid).
                 onTap: () => _editing != null ? _exitEdit() : widget.onMenuOpened(i),
                 onLongPress: () => _enterEdit(i),
+                onDoubleTap: () => _editing != null ? _exitEdit() : widget.onFullscreenOpened?.call(i),
                 onResizePreviewChanged: (_) {},
               ),
           ],
