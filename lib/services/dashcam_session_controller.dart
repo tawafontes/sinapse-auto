@@ -10,6 +10,7 @@ import '../models/driving_session.dart';
 import '../models/telemetry_snapshot.dart';
 import 'dashcam_clip_files.dart' show DashcamClipFileOps, dashcamClipBasename;
 import 'dashcam_clip_index.dart';
+import 'dashcam_gallery_exporter.dart';
 import 'dashcam_preferences.dart';
 import 'dashcam_service.dart';
 import 'dashcam_storage_probe.dart';
@@ -197,6 +198,7 @@ class DashcamSessionController extends ChangeNotifier with WidgetsBindingObserve
     required this.snapshotStream,
     required this.eventStream,
     this.storageProbe = const MethodChannelDashcamStorageProbe(),
+    this.galleryExporter = const MethodChannelDashcamGalleryExporter(),
   }) : _lastSeenQuotaMb = dashcamPreferences.storageQuotaMb,
        _storageSnapshot = latestDashcamStorageSnapshot {
     // Fase 16.2-R4.3-R1 (§6, D0-approved lifecycle-generation architecture
@@ -232,6 +234,20 @@ class DashcamSessionController extends ChangeNotifier with WidgetsBindingObserve
   /// ([DashcamStorageProbe.isSupported] false) neither reads it, and a START
   /// is never held for it.
   final DashcamStorageProbe storageProbe;
+
+  /// Copies every published clip into the phone's gallery — see
+  /// [_exportToGallery]. On a platform without the native side
+  /// ([DashcamGalleryExporter.isSupported] false) nothing is exported and no
+  /// `await` is added anywhere.
+  final DashcamGalleryExporter galleryExporter;
+
+  /// The last gallery copy failed, and why — for a UI to say so. Cleared by the
+  /// next copy that succeeds. `null` while the copies are healthy.
+  String? galleryExportFailureMessage;
+
+  /// The gallery copies, one at a time, in publication order. Each link
+  /// absorbs its own failure, so the chain never breaks.
+  Future<void> _galleryExportTail = Future<void>.value();
 
   DashcamStatus _liveStatus = DashcamStatus.idle;
   String? errorMessage;
@@ -2729,7 +2745,44 @@ class DashcamSessionController extends ChangeNotifier with WidgetsBindingObserve
   /// segment may have replaced by then.
   void _onClipPublished(DashcamClip clip) {
     final triggerClipPath = clip.file.path;
+    _exportToGallery(clip);
     unawaited(_indexProducedClip(clip).then((_) => _runStoragePass(DashcamQuotaTrigger.publication, triggerClipPath: triggerClipPath)));
+  }
+
+  /// A published segment is copied into the phone's gallery (`Movies/Synapse
+  /// Auto`) — the private clip stays where it is, so the index, the quota,
+  /// protection and playback are untouched by it. Outside both FIFOs (camera
+  /// and index): nothing awaits a copy, so a slow or failing copy never delays
+  /// a rotation, a STOP or the quota. Copies run one at a time, on a native
+  /// background thread.
+  ///
+  /// The clip that triggered a quota pass and the newest clip are immune to it
+  /// ([_newestClipOfThisProcess]), and a copy (~1 s for a segment) starts long
+  /// before the next segment's pass can make this clip evictable; a clip
+  /// evicted anyway before its copy started fails that copy, which is reported
+  /// like any other failure. A failure is diagnostic only
+  /// ([DashcamServiceErrorScope.recordingResult]): the recording goes on.
+  void _exportToGallery(DashcamClip clip) {
+    if (!galleryExporter.isSupported) return;
+    final path = clip.file.path;
+    final recordedAt = clip.recordedAt;
+    _galleryExportTail = _galleryExportTail.then((_) async {
+      try {
+        await galleryExporter.saveVideo(path: path, displayName: dashcamGalleryDisplayName(recordedAt), recordedAt: recordedAt);
+        if (galleryExportFailureMessage != null) {
+          galleryExportFailureMessage = null;
+          if (!_disposed) notifyListeners();
+        }
+      } catch (error) {
+        final message = error is DashcamGalleryPermissionDenied
+            ? 'Não foi possível salvar o clipe na galeria: permita "Armazenamento" nas permissões do app.'
+            : 'Não foi possível salvar o clipe na galeria ($error).';
+        galleryExportFailureMessage = message;
+        if (_disposed) return;
+        dashcamService.reportExternalError(message, scope: DashcamServiceErrorScope.recordingResult);
+        notifyListeners();
+      }
+    });
   }
 
   /// Fase 16.2-R4.4-R2: test-only — replaces the file operations of the

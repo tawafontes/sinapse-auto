@@ -1,6 +1,15 @@
 package com.synapseauto.synapse_auto
 
+import android.Manifest
+import android.content.ContentValues
+import android.content.pm.PackageManager
+import android.media.MediaScannerConnection
+import android.os.Build
+import android.os.Environment
+import android.os.Handler
+import android.os.Looper
 import android.os.StatFs
+import android.provider.MediaStore
 import android.system.ErrnoException
 import android.system.Os
 import android.system.OsConstants
@@ -8,6 +17,11 @@ import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 import java.io.File
+import java.io.FileInputStream
+import java.io.IOException
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
+import java.util.concurrent.RejectedExecutionException
 
 /**
  * Fase 16.2-R4.4-R2 — the dashcam storage bridge (`dashcam_storage_probe.dart`).
@@ -48,6 +62,110 @@ class MainActivity : FlutterActivity() {
                 else -> result.notImplemented()
             }
         }
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, GALLERY_CHANNEL).setMethodCallHandler { call, result ->
+            when (call.method) {
+                "saveVideo" -> {
+                    val path = call.argument<String>("path")
+                    val displayName = call.argument<String>("displayName")
+                    val recordedAtMs = call.argument<Number>("recordedAtMs")?.toLong()
+                    if (path == null || displayName == null || recordedAtMs == null) {
+                        result.error("bad_args", "saveVideo: missing arguments", null)
+                    } else {
+                        saveVideoInBackground(path, displayName, recordedAtMs, result)
+                    }
+                }
+                else -> result.notImplemented()
+            }
+        }
+    }
+
+    /**
+     * Copies a finished dashcam clip into the gallery (`Movies/Synapse Auto`). The
+     * clip itself stays in the app's private dashcam_clips/ — Dart's index, quota
+     * and playback own it. The copy runs on [galleryExecutor] (one thread, one copy
+     * at a time), never on the main thread: that thread also runs the Dart UI
+     * isolate and the camera callbacks, and a ~60–100 MB copy there would stall
+     * both (see the R4.4-HW-MIG main-thread findings). The reply is posted back to
+     * the main thread, where MethodChannel.Result must be answered.
+     */
+    private fun saveVideoInBackground(path: String, displayName: String, recordedAtMs: Long, result: MethodChannel.Result) {
+        try {
+            galleryExecutor.execute {
+                try {
+                    val saved = saveVideoToGallery(path, displayName, recordedAtMs)
+                    mainHandler.post { result.success(saved) }
+                } catch (error: GalleryPermissionMissing) {
+                    mainHandler.post { result.error("storage_permission", "WRITE_EXTERNAL_STORAGE not granted", null) }
+                } catch (error: Exception) {
+                    mainHandler.post { result.error("save_failed", "${error.javaClass.simpleName}: ${error.message}", null) }
+                }
+            }
+        } catch (error: RejectedExecutionException) {
+            result.error("save_failed", "activity is being destroyed", null)
+        }
+    }
+
+    private class GalleryPermissionMissing : Exception()
+
+    /** Returns the gallery entry's URI (Android 10+) or file path (before 10). */
+    private fun saveVideoToGallery(path: String, displayName: String, recordedAtMs: Long): String {
+        val source = File(path)
+        // Only this app's own files: the channel must not become a way to copy any
+        // readable file into shared storage.
+        val dataDir = File(applicationInfo.dataDir).canonicalPath + File.separator
+        if (!source.canonicalPath.startsWith(dataDir)) throw IOException("not an app file")
+        if (!source.isFile) throw IOException("clip not found")
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            // Android 10+: MediaStore needs no permission to add the app's own media.
+            // IS_PENDING hides the entry from the gallery until the copy is complete;
+            // a failed copy deletes it, so no truncated video is ever left behind.
+            val resolver = applicationContext.contentResolver
+            val values = ContentValues().apply {
+                put(MediaStore.MediaColumns.DISPLAY_NAME, displayName)
+                put(MediaStore.MediaColumns.MIME_TYPE, "video/mp4")
+                put(MediaStore.MediaColumns.RELATIVE_PATH, "${Environment.DIRECTORY_MOVIES}/$GALLERY_ALBUM")
+                put(MediaStore.MediaColumns.DATE_TAKEN, recordedAtMs)
+                put(MediaStore.MediaColumns.IS_PENDING, 1)
+            }
+            val collection = MediaStore.Video.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+            val uri = resolver.insert(collection, values) ?: throw IOException("MediaStore insert returned null")
+            try {
+                val output = resolver.openOutputStream(uri) ?: throw IOException("MediaStore output stream unavailable")
+                output.use { out -> FileInputStream(source).use { input -> input.copyTo(out, COPY_BUFFER_BYTES) } }
+                values.clear()
+                values.put(MediaStore.MediaColumns.IS_PENDING, 0)
+                resolver.update(uri, values, null, null)
+            } catch (error: Exception) {
+                resolver.delete(uri, null, null)
+                throw error
+            }
+            return uri.toString()
+        }
+
+        // Android 7–9: a plain file in the public Movies folder, then a media scan so
+        // the gallery lists it. Needs WRITE_EXTERNAL_STORAGE (declared up to API 28).
+        if (checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
+            throw GalleryPermissionMissing()
+        }
+        @Suppress("DEPRECATION")
+        val album = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES), GALLERY_ALBUM)
+        if (!album.isDirectory && !album.mkdirs()) throw IOException("cannot create ${album.path}")
+        val base = displayName.removeSuffix(".mp4")
+        var target = File(album, displayName)
+        var n = 1
+        while (target.exists()) target = File(album, "$base ($n).mp4").also { n++ }
+        val partial = File(album, ".${target.name}.partial")
+        try {
+            FileInputStream(source).use { input -> partial.outputStream().use { out -> input.copyTo(out, COPY_BUFFER_BYTES) } }
+            if (!partial.renameTo(target)) throw IOException("cannot rename into ${target.path}")
+        } catch (error: Exception) {
+            partial.delete()
+            throw error
+        }
+        target.setLastModified(recordedAtMs)
+        MediaScannerConnection.scanFile(applicationContext, arrayOf(target.path), arrayOf("video/mp4"), null)
+        return target.path
     }
 
     /**
@@ -116,7 +234,20 @@ class MainActivity : FlutterActivity() {
         )
     }
 
+    override fun onDestroy() {
+        // Pending copies are dropped with the activity; their clips stay in the
+        // private folder (only the gallery copy of those segments is missed).
+        galleryExecutor.shutdown()
+        super.onDestroy()
+    }
+
+    private val galleryExecutor: ExecutorService = Executors.newSingleThreadExecutor()
+    private val mainHandler = Handler(Looper.getMainLooper())
+
     private companion object {
         const val STORAGE_CHANNEL = "com.synapseauto.synapse_auto/dashcam_storage"
+        const val GALLERY_CHANNEL = "com.synapseauto.synapse_auto/dashcam_gallery"
+        const val GALLERY_ALBUM = "Synapse Auto"
+        const val COPY_BUFFER_BYTES = 1 shl 20
     }
 }

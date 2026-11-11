@@ -192,6 +192,13 @@ class _SessionRecordingScreenState extends State<SessionRecordingScreen> {
                             padding: const EdgeInsets.symmetric(vertical: 6),
                             child: Text(telemetryFailure, textAlign: TextAlign.center, style: TextStyle(color: colorScheme.error)),
                           ),
+                        // The clips keep being recorded and kept in the app; only
+                        // their copy to the phone's gallery failed.
+                        if (widget.dashcamController?.galleryExportFailureMessage case final galleryFailure?)
+                          Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 6),
+                            child: Text(galleryFailure, textAlign: TextAlign.center, style: TextStyle(color: colorScheme.error)),
+                          ),
                         // Fase 16.2-R4.3-R2.6.4: a failed finalization is shown, with the retry.
                         if (recorderState == DrivingSessionRecorderState.finalizationFailed) ...[
                           const SizedBox(height: 16),
