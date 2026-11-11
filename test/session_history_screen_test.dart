@@ -401,6 +401,70 @@ void main() {
       },
     );
   });
+
+  group('visible delete actions (2026-11-11)', () {
+    final box = Hive.box<DrivingSession>;
+
+    Future<String> finishedSession(WidgetTester tester, _Env env) async => (await tester.runAsync(() async {
+      final s = env.recorder.startSession();
+      await env.feed(2);
+      await env.recorder.stopSession();
+      return s.id;
+    }))!;
+
+    testWidgets('each finished session has a delete button: confirmed, it deletes the session like the swipe does', (tester) async {
+      await _withEnv(tester, (env) async {
+        final a = await finishedSession(tester, env);
+        await tester.pumpWidget(_app());
+        await tester.pump();
+
+        await tester.tap(find.byTooltip('Excluir sessão'));
+        await tester.pumpAndSettle();
+        expect(find.textContaining('vídeos gravados no app, será apagada permanentemente'), findsOneWidget);
+        await tester.tap(find.text('Excluir'));
+        await _pumpUntil(tester, () => !box(HiveBoxNames.drivingSessions).containsKey(a), 'the session deleted');
+        await tester.pump();
+        expect(find.text('Nenhuma sessão registrada ainda.'), findsOneWidget);
+      });
+    });
+
+    testWidgets('"Limpar histórico" deletes every finished session and never the one still recording', (tester) async {
+      await _withEnv(tester, (env) async {
+        final a = await finishedSession(tester, env);
+        final b = await finishedSession(tester, env);
+        final live = (await tester.runAsync(() async {
+          final s = env.recorder.startSession();
+          await env.feed(2);
+          return s.id;
+        }))!;
+        await tester.pumpWidget(_app());
+        await tester.pump();
+
+        await tester.tap(find.byTooltip('Limpar histórico'));
+        await tester.pumpAndSettle();
+        expect(find.textContaining('As 2 sessões finalizadas serão apagadas'), findsOneWidget);
+        await tester.tap(find.text('Excluir tudo'));
+        await _pumpUntil(tester, () => find.text('Histórico limpo.').evaluate().isNotEmpty, 'the result shown');
+
+        expect(box(HiveBoxNames.drivingSessions).containsKey(a), isFalse);
+        expect(box(HiveBoxNames.drivingSessions).containsKey(b), isFalse);
+        expect(box(HiveBoxNames.drivingSessions).containsKey(live), isTrue, reason: 'the recording session is untouched');
+        expect(env.recorder.state, DrivingSessionRecorderState.recording);
+        expect(find.byType(CircularProgressIndicator), findsNothing, reason: 'the progress dialog closed');
+      });
+    });
+
+    testWidgets('"Limpar histórico" with nothing finished says so and asks nothing', (tester) async {
+      await _withEnv(tester, (env) async {
+        await tester.pumpWidget(_app());
+        await tester.pump();
+        await tester.tap(find.byTooltip('Limpar histórico'));
+        await tester.pump();
+        expect(find.text('Limpar histórico?'), findsNothing);
+        expect(find.text('Não há sessões finalizadas para excluir.'), findsOneWidget);
+      });
+    });
+  });
 }
 
 const _pathProviderChannel = MethodChannel('plugins.flutter.io/path_provider');

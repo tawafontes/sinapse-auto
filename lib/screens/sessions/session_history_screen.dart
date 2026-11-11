@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 
@@ -45,11 +47,98 @@ List<DrivingSession> visibleSessionsSortedByRecency(Iterable<DrivingSession> ses
 class SessionHistoryScreen extends StatelessWidget {
   const SessionHistoryScreen({super.key});
 
+  /// "Limpar histórico": every listed session a recorder does not control is
+  /// deleted through [deleteDrivingSession] — one at a time, the same
+  /// authority (and the same durable, resumable protocol) as deleting one. A
+  /// session still recording or finalizing is left alone and said so; a
+  /// deletion that fails stays listed as pending, as for a single one.
+  Future<void> _clearHistory(BuildContext context) async {
+    final box = Hive.box<DrivingSession>(HiveBoxNames.drivingSessions);
+    final sessions = visibleSessionsSortedByRecency(box.values);
+    final deletable = [
+      for (final s in sessions)
+        if (DrivingSessionRecorder.controllingState(s.id) == null) s,
+    ];
+    final messenger = ScaffoldMessenger.of(context);
+    if (deletable.isEmpty) {
+      messenger.showSnackBar(const SnackBar(content: Text('Não há sessões finalizadas para excluir.')));
+      return;
+    }
+    final kept = sessions.length - deletable.length;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Limpar histórico?'),
+        content: Text(
+          '${deletable.length == 1 ? 'A sessão finalizada será apagada' : 'As ${deletable.length} sessões finalizadas serão apagadas'} '
+          'permanentemente, com trajetórias, telemetria e vídeos gravados no app. '
+          'As cópias na galeria do celular não são apagadas.'
+          '${kept > 0 ? '\n\nA sessão em andamento não é afetada.' : ''}',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(dialogContext).pop(false), child: const Text('Cancelar')),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Theme.of(dialogContext).colorScheme.error),
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('Excluir tudo'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !context.mounted) return;
+    final navigator = Navigator.of(context);
+    unawaited(
+      showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => const PopScope(
+          canPop: false,
+          child: AlertDialog(
+            content: Row(children: [CircularProgressIndicator(), SizedBox(width: 20), Expanded(child: Text('Excluindo sessões…'))]),
+          ),
+        ),
+      ),
+    );
+    var failed = 0;
+    for (final session in deletable) {
+      try {
+        await deleteDrivingSession(session.id);
+      } on SessionDeletionRejected {
+        failed++;
+      } catch (_) {
+        // The record keeps its deletion marker: listed as pending, finished by
+        // a swipe or by the next app start.
+        failed++;
+      }
+    }
+    navigator.pop();
+    messenger.showSnackBar(
+      SnackBar(
+        content: Text(
+          failed == 0
+              ? 'Histórico limpo.'
+              : '${deletable.length - failed} de ${deletable.length} sessões excluídas; as demais ficam pendentes e são concluídas na próxima abertura do app.',
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final box = Hive.box<DrivingSession>(HiveBoxNames.drivingSessions);
     return Scaffold(
-      appBar: AppBar(title: const Text('Histórico')),
+      appBar: AppBar(
+        title: const Text('Histórico'),
+        actions: [
+          Builder(
+            builder: (context) => IconButton(
+              icon: const Icon(Icons.delete_sweep_outlined),
+              tooltip: 'Limpar histórico',
+              onPressed: () => _clearHistory(context),
+            ),
+          ),
+        ],
+      ),
       body: SafeArea(
         child: ListenableBuilder(
           listenable: Listenable.merge([box.listenable(), DrivingSessionRecorder.sessionControlChanges]),
@@ -90,7 +179,10 @@ class _SessionListTile extends StatelessWidget {
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Excluir esta sessão?'),
-        content: Text('A sessão de ${_formatDate(session.startTime)} e sua trajetória serão apagadas permanentemente.'),
+        content: Text(
+          'A sessão de ${_formatDate(session.startTime)}, com trajetória, telemetria e vídeos gravados no app, será apagada permanentemente. '
+          'A cópia na galeria do celular, se houver, não é apagada.',
+        ),
         actions: [
           TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Cancelar')),
           FilledButton(
@@ -195,7 +287,15 @@ class _SessionListTile extends StatelessWidget {
           '${maxSpeed == null ? '' : ' · máx ${convertSpeedFromKmh(maxSpeed, prefs.speedUnit).toStringAsFixed(0)} ${speedUnitLabel(prefs.speedUnit)}'}'
           '${[for (final n in notes) '\n$n'].join()}',
         ),
-        trailing: const Icon(Icons.chevron_right),
+        // The swipe still deletes too; this makes it visible. Not offered
+        // while a recorder controls the session (the note says why).
+        trailing: controlled == null
+            ? IconButton(
+                icon: const Icon(Icons.delete_outline),
+                tooltip: 'Excluir sessão',
+                onPressed: () => _confirmAndDelete(context),
+              )
+            : const Icon(Icons.chevron_right),
         onTap: () => Navigator.of(context).push(
           MaterialPageRoute(builder: (_) => SessionDetailScreen(session: session)),
         ),
