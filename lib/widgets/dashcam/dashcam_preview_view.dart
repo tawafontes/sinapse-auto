@@ -4,6 +4,7 @@ import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 
 import '../../models/dashcam_status.dart';
+import '../../screens/sessions/dashcam_recordings_screen.dart';
 import '../../screens/settings/dashcam_settings_screen.dart';
 import '../../services/dashcam_session_controller.dart';
 import '../../services/driving_session_recorder.dart' show DrivingSessionRecorderState, SessionAdmissionRejected;
@@ -297,6 +298,16 @@ class _EmptyState extends StatelessWidget {
           if (_cameraEngaged(status) && _canStopFromPreview(controller)) ...[
             const SizedBox(height: 16),
             _StopButton(controller: controller),
+          ],
+          // A shortcut to the recordings whenever the camera is not in use —
+          // never next to a live recording's own controls.
+          if (!_cameraEngaged(status)) ...[
+            const SizedBox(height: 16),
+            TextButton.icon(
+              onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const DashcamRecordingsScreen())),
+              icon: const Icon(Icons.video_library_outlined),
+              label: const Text('Ver gravações'),
+            ),
           ],
         ],
       ),

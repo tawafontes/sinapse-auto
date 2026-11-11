@@ -9,6 +9,7 @@ import '../../services/theme_controller.dart';
 import '../hud/hud_screen.dart';
 import '../onboarding/theme_selection_screen.dart';
 import '../onboarding/welcome_screen.dart';
+import '../sessions/dashcam_recordings_screen.dart';
 import '../sessions/session_history_screen.dart';
 import '../sessions/session_recording_screen.dart';
 import 'alerts_screen.dart';
@@ -184,6 +185,15 @@ class SettingsMenuScreen extends StatelessWidget {
               trailing: const Icon(Icons.chevron_right),
               onTap: () => Navigator.of(context).push(
                 MaterialPageRoute(builder: (_) => const DashcamSettingsScreen()),
+              ),
+            ),
+            ListTile(
+              leading: const Icon(Icons.video_library_outlined),
+              title: const Text('Gravações'),
+              subtitle: const Text('Assistir aos vídeos gravados pela Dashcam'),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const DashcamRecordingsScreen()),
               ),
             ),
             ListTile(

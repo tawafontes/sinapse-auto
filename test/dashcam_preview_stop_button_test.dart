@@ -135,6 +135,7 @@ void main() {
       await tester.pump();
       expect(find.text('Iniciar sessão'), findsOneWidget);
       expect(_stopButton, findsNothing);
+      expect(find.text('Ver gravações'), findsOneWidget, reason: 'the shortcut to the recordings, with the camera idle');
     } finally {
       await tester.runAsync(rig.close);
     }
@@ -151,6 +152,7 @@ void main() {
       await _mount(tester, rig);
       await tester.pump();
       expect(_stopButton, findsOneWidget);
+      expect(find.text('Ver gravações'), findsNothing, reason: 'never next to a live recording');
 
       await tester.runAsync(() async {
         _pressStop(tester);
