@@ -43,6 +43,30 @@ extension VehicleFuelSystemFuels on VehicleFuelSystem {
       };
 }
 
+/// How the vehicle is driven (2026-11-12, owner decision: hybrids only, no pure
+/// electric). A [hybrid] (including a mild hybrid) never charges from the grid
+/// and follows the combustion rules — only its numbers are better. A
+/// [plugInHybrid] also charges, which brings recharges, the battery and the
+/// split between electric and combustion kilometres (see
+/// `hybrid_consumption.dart`).
+///
+/// typeId: 20
+@HiveType(typeId: 20)
+enum VehiclePropulsion {
+  @HiveField(0)
+  combustion,
+  @HiveField(1)
+  hybrid,
+  @HiveField(2)
+  plugInHybrid,
+}
+
+const Map<VehiclePropulsion, String> vehiclePropulsionLabels = {
+  VehiclePropulsion.combustion: 'Combustão',
+  VehiclePropulsion.hybrid: 'Híbrido',
+  VehiclePropulsion.plugInHybrid: 'Plug-in',
+};
+
 const Map<FuelType, String> fuelTypeLabels = {
   FuelType.gasoline: 'Gasolina',
   FuelType.ethanol: 'Etanol',
@@ -65,7 +89,8 @@ const Map<VehicleFuelSystem, String> vehicleFuelSystemLabels = {
 ///
 /// Engine displacement is deliberately absent: it is only needed for a
 /// speed-density fuel estimate on a car without a MAF sensor, which the OBD-II
-/// phase 0 has not measured yet. Add it then, nullable, as field 7.
+/// phase 0 has not measured yet. Add it then, nullable, as field 12 (fields
+/// 7–11 were taken by the hybrid strategy, 2026-11-12).
 ///
 /// typeId: 18
 @HiveType(typeId: 18)
@@ -78,6 +103,11 @@ class VehicleProfile extends HiveObject {
     this.kmPerLiterEthanol,
     this.kmPerLiterDiesel,
     required this.defaultFuel,
+    this.propulsion = VehiclePropulsion.combustion,
+    this.batteryCapacityKwh,
+    this.electricRangeKm,
+    this.autoUpdateReferences = true,
+    this.defaultPricePerKwh,
   });
 
   /// Optional name shown in the app ("Meu carro" when absent).
@@ -107,11 +137,51 @@ class VehicleProfile extends HiveObject {
   @HiveField(6)
   FuelType defaultFuel;
 
+  /// Combustion for every profile stored before hybrids existed.
+  @HiveField(7, defaultValue: VehiclePropulsion.combustion)
+  VehiclePropulsion propulsion;
+
+  /// Plug-in only: the usable battery capacity the user typed (the H6 PHEV19's
+  /// pack is 19.1 kWh nominal; the usable share is not published). With
+  /// [autoUpdateReferences] on, recharges refine it (see
+  /// `HybridSummary.capacityKwh`).
+  @HiveField(8)
+  double? batteryCapacityKwh;
+
+  /// Plug-in only: the electric range reference (km, spec sheet or label);
+  /// with [batteryCapacityKwh] it gives the typed km/kWh reference.
+  @HiveField(9)
+  double? electricRangeKm;
+
+  /// "Atualizar referências com as minhas medições" (owner decision, on by
+  /// default): the km/L, km/kWh and battery capacity references follow the
+  /// mean of the last measurements instead of the typed values, which stay
+  /// stored and are used again when this is turned off.
+  @HiveField(10, defaultValue: true)
+  bool autoUpdateReferences;
+
+  /// Plug-in only: the usual price of a kWh — the home tariff (owner request,
+  /// 2026-11-12). A new recharge starts with it; changing the price of one
+  /// recharge (a public charger) does not change it.
+  @HiveField(11)
+  double? defaultPricePerKwh;
+
+  bool get isPlugIn => propulsion == VehiclePropulsion.plugInHybrid;
+
+  /// The km/kWh reference the user typed: range over capacity.
+  double? get typedKmPerKwh {
+    final capacity = batteryCapacityKwh;
+    final range = electricRangeKm;
+    return capacity == null || range == null || capacity <= 0 ? null : range / capacity;
+  }
+
   String get displayName {
     final name = nickname?.trim();
     return name == null || name.isEmpty ? 'Meu carro' : name;
   }
 
+  /// The km/L the user typed for [fuel] (the one in use may be a measured one,
+  /// see `ConsumptionSummary.referenceKmPerLiter`).
   double? referenceKmPerLiter(FuelType fuel) => switch (fuel) {
         FuelType.gasoline => kmPerLiterGasoline,
         FuelType.ethanol => kmPerLiterEthanol,

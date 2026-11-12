@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hive/hive.dart';
+import 'package:synapse_auto/models/charge_record.dart';
 import 'package:synapse_auto/models/detected_event.dart';
 import 'package:synapse_auto/models/driving_session.dart';
 import 'package:synapse_auto/models/driving_session_event.dart';
@@ -31,6 +32,8 @@ void main() {
       Hive.registerAdapter(VehicleFuelSystemAdapter());
       Hive.registerAdapter(VehicleProfileAdapter());
       Hive.registerAdapter(RefuelRecordAdapter());
+      Hive.registerAdapter(VehiclePropulsionAdapter());
+      Hive.registerAdapter(ChargeRecordAdapter());
     }
     if (!Hive.isAdapterRegistered(DrivingSessionAdapter().typeId)) {
       Hive.registerAdapter(DrivingSessionAdapter());
@@ -40,6 +43,7 @@ void main() {
     }
     await Hive.openBox<VehicleProfile>(HiveBoxNames.vehicleProfile, bytes: Uint8List(0));
     await Hive.openBox<RefuelRecord>(HiveBoxNames.refuelRecords, bytes: Uint8List(0));
+    await Hive.openBox<ChargeRecord>(HiveBoxNames.chargeRecords, bytes: Uint8List(0));
     await Hive.openBox<DrivingSession>(HiveBoxNames.drivingSessions, bytes: Uint8List(0));
   });
 

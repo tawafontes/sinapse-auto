@@ -1,11 +1,13 @@
 import 'package:flutter/foundation.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 
+import '../models/charge_record.dart';
 import '../models/driving_session.dart';
 import '../models/refuel_record.dart';
 import '../models/vehicle_profile.dart';
 import 'fuel_consumption.dart';
 import 'hive_boxes.dart';
+import 'hybrid_consumption.dart';
 
 /// "Meu veículo": the one [VehicleProfile] (single vehicle, owner decision
 /// 2026-11-11), under a fixed key of its own box.
@@ -65,3 +67,26 @@ class RefuelRepository {
   static ValueListenable<Box<DrivingSession>> sessionsListenable() =>
       Hive.box<DrivingSession>(HiveBoxNames.drivingSessions).listenable();
 }
+
+/// A plug-in hybrid's recharges, keyed by [ChargeRecord.id] (2026-11-12).
+class ChargeRepository {
+  ChargeRepository._();
+
+  static Box<ChargeRecord> get _box => Hive.box<ChargeRecord>(HiveBoxNames.chargeRecords);
+
+  /// Oldest first.
+  static List<ChargeRecord> get chronological => vehicleTimeline(const [], _box.values).cast<ChargeRecord>();
+
+  static ValueListenable<Box<ChargeRecord>> listenable() => _box.listenable();
+
+  static String newId() => 'charge_${DateTime.now().microsecondsSinceEpoch}';
+
+  /// Adds [charge], or replaces the stored one with the same id.
+  static Future<void> save(ChargeRecord charge) => _box.put(charge.id, charge);
+
+  static Future<void> delete(ChargeRecord charge) => _box.delete(charge.id);
+}
+
+/// Refuels and recharges together, oldest first — the odometer suggestion and
+/// its ordering check span both.
+List<OdometerRecord> allVehicleRecords() => vehicleTimeline(RefuelRepository.chronological, ChargeRepository.chronological);

@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hive/hive.dart';
+import 'package:synapse_auto/models/charge_record.dart';
 import 'package:synapse_auto/models/detected_event.dart';
 import 'package:synapse_auto/models/driving_session.dart';
 import 'package:synapse_auto/models/driving_session_event.dart';
@@ -20,6 +21,7 @@ void main() {
   Future<void> openBoxes() async {
     await Hive.openBox<VehicleProfile>(HiveBoxNames.vehicleProfile);
     await Hive.openBox<RefuelRecord>(HiveBoxNames.refuelRecords);
+    await Hive.openBox<ChargeRecord>(HiveBoxNames.chargeRecords);
     await Hive.openBox<DrivingSession>(HiveBoxNames.drivingSessions);
   }
 
@@ -35,6 +37,8 @@ void main() {
       Hive.registerAdapter(VehicleFuelSystemAdapter());
       Hive.registerAdapter(VehicleProfileAdapter());
       Hive.registerAdapter(RefuelRecordAdapter());
+      Hive.registerAdapter(VehiclePropulsionAdapter());
+      Hive.registerAdapter(ChargeRecordAdapter());
     }
     if (!Hive.isAdapterRegistered(DrivingSessionAdapter().typeId)) {
       Hive.registerAdapter(DrivingSessionAdapter());
@@ -170,6 +174,112 @@ void main() {
     final reopened = await Hive.openBox<SensorWidgetConfig>(HiveBoxNames.sensorWidgetConfigs);
     expect((reopened.values.single.sensorType, reopened.values.single.displayStyle), (SensorType.refuel, DisplayStyle.refuelSummary));
   });
+
+  group('hybrids (2026-11-12)', () {
+    test('a profile stored before hybrids existed reads as combustion, with the reference switch on', () async {
+      // The exact 7-field record the previous app version wrote.
+      Hive.registerAdapter(_ProfileBeforeHybrids(), override: true);
+      await Hive.box<VehicleProfile>(HiveBoxNames.vehicleProfile).put('vehicle', VehicleProfile(
+        fuelSystem: VehicleFuelSystem.flex,
+        tankCapacityLiters: 50,
+        kmPerLiterGasoline: 12,
+        kmPerLiterEthanol: 8.4,
+        defaultFuel: FuelType.gasoline,
+      ));
+      await Hive.close();
+      Hive.registerAdapter(VehicleProfileAdapter(), override: true);
+      await openBoxes();
+      final p = VehicleRepository.profile!;
+      expect((p.propulsion, p.autoUpdateReferences, p.batteryCapacityKwh, p.electricRangeKm, p.isPlugIn),
+          (VehiclePropulsion.combustion, true, null, null, false));
+      expect((p.tankCapacityLiters, p.kmPerLiterEthanol), (50.0, 8.4));
+    });
+
+    test('a plug-in profile and its fields survive closing and reopening', () async {
+      await VehicleRepository.save(VehicleProfile(
+        fuelSystem: VehicleFuelSystem.gasoline,
+        tankCapacityLiters: 55,
+        kmPerLiterGasoline: 14,
+        defaultFuel: FuelType.gasoline,
+        propulsion: VehiclePropulsion.plugInHybrid,
+        batteryCapacityKwh: 19.1,
+        electricRangeKm: 73,
+        autoUpdateReferences: false,
+        defaultPricePerKwh: 0.92,
+      ));
+      await reopen();
+      final p = VehicleRepository.profile!;
+      expect((p.propulsion, p.batteryCapacityKwh, p.electricRangeKm, p.autoUpdateReferences, p.typedKmPerKwh, p.defaultPricePerKwh),
+          (VehiclePropulsion.plugInHybrid, 19.1, 73.0, false, 73 / 19.1, 0.92));
+    });
+
+    test('a recharge and a refuel\'s panel readings survive closing and reopening', () async {
+      final date = DateTime(2026, 11, 12, 21, 5);
+      await ChargeRepository.save(ChargeRecord(
+        id: 'c1',
+        date: date,
+        odometerKm: 15020,
+        startPercent: 8,
+        endPercent: 100,
+        chargerKwh: 16.4,
+        pricePerKwh: 0.92,
+        wallKwh: 16.4,
+        usedFuelSinceLast: true,
+        panelFuelRangeKm: 540,
+      ));
+      await RefuelRepository.save(RefuelRecord(
+        id: 'r1',
+        date: date.add(const Duration(days: 1)),
+        odometerKm: 15100,
+        liters: 10,
+        pricePerLiter: 6.1,
+        fuel: FuelType.gasoline,
+        fullTank: true,
+        usedFuelSinceLast: false,
+        panelFuelRangeAfterKm: 610,
+      ));
+      await reopen();
+      final c = ChargeRepository.chronological.single;
+      expect(
+        (c.date, c.odometerKm, c.startPercent, c.endPercent, c.chargerKwh, c.pricePerKwh, c.wallKwh, c.usedFuelSinceLast, c.panelFuelRangeKm),
+        (date, 15020.0, 8.0, 100.0, 16.4, 0.92, 16.4, true, 540.0),
+      );
+      final r = RefuelRepository.chronological.single;
+      expect((r.usedFuelSinceLast, r.panelFuelRangeBeforeKm, r.panelFuelRangeAfterKm), (false, null, 610.0));
+      expect(allVehicleRecords().map((e) => e.id), ['c1', 'r1']);
+      await ChargeRepository.delete(c);
+      expect(ChargeRepository.chronological, isEmpty);
+    });
+  });
+}
+
+/// What the app wrote for a VehicleProfile before 2026-11-12: fields 0–6 only.
+class _ProfileBeforeHybrids extends TypeAdapter<VehicleProfile> {
+  @override
+  final int typeId = 18;
+
+  @override
+  VehicleProfile read(BinaryReader reader) => throw UnimplementedError();
+
+  @override
+  void write(BinaryWriter writer, VehicleProfile obj) {
+    writer
+      ..writeByte(7)
+      ..writeByte(0)
+      ..write(obj.nickname)
+      ..writeByte(1)
+      ..write(obj.fuelSystem)
+      ..writeByte(2)
+      ..write(obj.tankCapacityLiters)
+      ..writeByte(3)
+      ..write(obj.kmPerLiterGasoline)
+      ..writeByte(4)
+      ..write(obj.kmPerLiterEthanol)
+      ..writeByte(5)
+      ..write(obj.kmPerLiterDiesel)
+      ..writeByte(6)
+      ..write(obj.defaultFuel);
+  }
 }
 
 bool _containsSequence(List<int> bytes, List<int> sequence) {

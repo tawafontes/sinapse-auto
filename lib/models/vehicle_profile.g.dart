@@ -24,13 +24,20 @@ class VehicleProfileAdapter extends TypeAdapter<VehicleProfile> {
       kmPerLiterEthanol: fields[4] as double?,
       kmPerLiterDiesel: fields[5] as double?,
       defaultFuel: fields[6] as FuelType,
+      propulsion: fields[7] == null
+          ? VehiclePropulsion.combustion
+          : fields[7] as VehiclePropulsion,
+      batteryCapacityKwh: fields[8] as double?,
+      electricRangeKm: fields[9] as double?,
+      autoUpdateReferences: fields[10] == null ? true : fields[10] as bool,
+      defaultPricePerKwh: fields[11] as double?,
     );
   }
 
   @override
   void write(BinaryWriter writer, VehicleProfile obj) {
     writer
-      ..writeByte(7)
+      ..writeByte(12)
       ..writeByte(0)
       ..write(obj.nickname)
       ..writeByte(1)
@@ -44,7 +51,17 @@ class VehicleProfileAdapter extends TypeAdapter<VehicleProfile> {
       ..writeByte(5)
       ..write(obj.kmPerLiterDiesel)
       ..writeByte(6)
-      ..write(obj.defaultFuel);
+      ..write(obj.defaultFuel)
+      ..writeByte(7)
+      ..write(obj.propulsion)
+      ..writeByte(8)
+      ..write(obj.batteryCapacityKwh)
+      ..writeByte(9)
+      ..write(obj.electricRangeKm)
+      ..writeByte(10)
+      ..write(obj.autoUpdateReferences)
+      ..writeByte(11)
+      ..write(obj.defaultPricePerKwh);
   }
 
   @override
@@ -147,6 +164,50 @@ class VehicleFuelSystemAdapter extends TypeAdapter<VehicleFuelSystem> {
   bool operator ==(Object other) =>
       identical(this, other) ||
       other is VehicleFuelSystemAdapter &&
+          runtimeType == other.runtimeType &&
+          typeId == other.typeId;
+}
+
+class VehiclePropulsionAdapter extends TypeAdapter<VehiclePropulsion> {
+  @override
+  final int typeId = 20;
+
+  @override
+  VehiclePropulsion read(BinaryReader reader) {
+    switch (reader.readByte()) {
+      case 0:
+        return VehiclePropulsion.combustion;
+      case 1:
+        return VehiclePropulsion.hybrid;
+      case 2:
+        return VehiclePropulsion.plugInHybrid;
+      default:
+        return VehiclePropulsion.combustion;
+    }
+  }
+
+  @override
+  void write(BinaryWriter writer, VehiclePropulsion obj) {
+    switch (obj) {
+      case VehiclePropulsion.combustion:
+        writer.writeByte(0);
+        break;
+      case VehiclePropulsion.hybrid:
+        writer.writeByte(1);
+        break;
+      case VehiclePropulsion.plugInHybrid:
+        writer.writeByte(2);
+        break;
+    }
+  }
+
+  @override
+  int get hashCode => typeId.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is VehiclePropulsionAdapter &&
           runtimeType == other.runtimeType &&
           typeId == other.typeId;
 }

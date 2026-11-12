@@ -28,6 +28,11 @@ class _VehicleProfileScreenState extends State<VehicleProfileScreen> {
   late final Map<FuelType, TextEditingController> _reference;
   late VehicleFuelSystem _fuelSystem;
   late FuelType _defaultFuel;
+  late VehiclePropulsion _propulsion;
+  late bool _autoUpdate;
+  late final TextEditingController _battery;
+  late final TextEditingController _electricRange;
+  late final TextEditingController _kwhPrice;
   bool _saving = false;
 
   @override
@@ -41,12 +46,20 @@ class _VehicleProfileScreenState extends State<VehicleProfileScreen> {
     };
     _fuelSystem = profile?.fuelSystem ?? VehicleFuelSystem.flex;
     _defaultFuel = profile?.defaultFuel ?? _fuelSystem.fuels.first;
+    _propulsion = profile?.propulsion ?? VehiclePropulsion.combustion;
+    _autoUpdate = profile?.autoUpdateReferences ?? true;
+    _battery = TextEditingController(text: editableNumber(profile?.batteryCapacityKwh));
+    _electricRange = TextEditingController(text: editableNumber(profile?.electricRangeKm));
+    _kwhPrice = TextEditingController(text: editableNumber(profile?.defaultPricePerKwh));
   }
 
   @override
   void dispose() {
     _nickname.dispose();
     _tank.dispose();
+    _battery.dispose();
+    _electricRange.dispose();
+    _kwhPrice.dispose();
     for (final c in _reference.values) {
       c.dispose();
     }
@@ -74,11 +87,33 @@ class _VehicleProfileScreenState extends State<VehicleProfileScreen> {
     return null;
   }
 
+  String? _validateBattery(String? text) {
+    final value = parseDecimal(text ?? '');
+    if (value == null) return 'Informe a capacidade útil da bateria em kWh.';
+    if (value < 1 || value > 200) return 'Use um valor entre 1 e 200 kWh.';
+    return null;
+  }
+
+  String? _validateElectricRange(String? text) {
+    final value = parseDecimal(text ?? '', dotGroupsThousands: true);
+    if (value == null) return 'Informe a autonomia elétrica em km.';
+    if (value < 5 || value > 1000) return 'Use um valor entre 5 e 1.000 km.';
+    return null;
+  }
+
+  String? _validateKwhPrice(String? text) {
+    if ((text ?? '').trim().isEmpty) return null;
+    final value = parseDecimal(text!);
+    if (value == null || value < 0 || value > 20) return 'Preço do kWh inválido.';
+    return null;
+  }
+
   Future<void> _save() async {
     if (_saving || !_formKey.currentState!.validate()) return;
     setState(() => _saving = true);
     double? reference(FuelType fuel) => _fuelSystem.fuels.contains(fuel) ? parseDecimal(_reference[fuel]!.text) : null;
     final nickname = _nickname.text.trim();
+    final plugIn = _propulsion == VehiclePropulsion.plugInHybrid;
     await VehicleRepository.save(VehicleProfile(
       nickname: nickname.isEmpty ? null : nickname,
       fuelSystem: _fuelSystem,
@@ -87,6 +122,11 @@ class _VehicleProfileScreenState extends State<VehicleProfileScreen> {
       kmPerLiterEthanol: reference(FuelType.ethanol),
       kmPerLiterDiesel: reference(FuelType.diesel),
       defaultFuel: _defaultFuel,
+      propulsion: _propulsion,
+      batteryCapacityKwh: plugIn ? parseDecimal(_battery.text) : null,
+      electricRangeKm: plugIn ? parseDecimal(_electricRange.text, dotGroupsThousands: true) : null,
+      autoUpdateReferences: _autoUpdate,
+      defaultPricePerKwh: plugIn && _kwhPrice.text.trim().isNotEmpty ? parseDecimal(_kwhPrice.text) : null,
     ));
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Veículo salvo.')));
@@ -111,6 +151,25 @@ class _VehicleProfileScreenState extends State<VehicleProfileScreen> {
                 decoration: const InputDecoration(labelText: 'Apelido (opcional)', hintText: 'Meu carro', border: OutlineInputBorder()),
                 textCapitalization: TextCapitalization.sentences,
               ),
+              const SizedBox(height: 20),
+              Text('Propulsão', style: theme.textTheme.titleSmall),
+              const SizedBox(height: 8),
+              SegmentedButton<VehiclePropulsion>(
+                key: const ValueKey('vehicle_propulsion'),
+                segments: [
+                  for (final p in VehiclePropulsion.values) ButtonSegment(value: p, label: Text(vehiclePropulsionLabels[p]!)),
+                ],
+                selected: {_propulsion},
+                showSelectedIcon: false,
+                onSelectionChanged: (s) => setState(() => _propulsion = s.single),
+              ),
+              if (_propulsion == VehiclePropulsion.hybrid) ...[
+                const SizedBox(height: 4),
+                Text(
+                  'Híbrido que não carrega na tomada: o app trata como um carro a combustão — os números só saem melhores.',
+                  style: theme.textTheme.bodySmall,
+                ),
+              ],
               const SizedBox(height: 20),
               Text('Combustível do veículo', style: theme.textTheme.titleSmall),
               const SizedBox(height: 8),
@@ -175,6 +234,63 @@ class _VehicleProfileScreenState extends State<VehicleProfileScreen> {
                   onSelectionChanged: (s) => setState(() => _defaultFuel = s.single),
                 ),
               ],
+              if (_propulsion == VehiclePropulsion.plugInHybrid) ...[
+                const SizedBox(height: 20),
+                Text('Bateria', style: theme.textTheme.titleSmall),
+                const SizedBox(height: 4),
+                Text(
+                  'A capacidade útil é a parte da bateria que o carro usa — menor que a nominal (no Haval H6 PHEV19, '
+                  '19,1 kWh nominais). Com as recargas, o app a ajusta se a chave abaixo estiver ligada.',
+                  style: theme.textTheme.bodySmall,
+                ),
+                const SizedBox(height: 12),
+                TextFormField(
+                  key: const ValueKey('vehicle_battery'),
+                  controller: _battery,
+                  decoration: const InputDecoration(labelText: 'Capacidade útil da bateria', suffixText: 'kWh', border: OutlineInputBorder()),
+                  keyboardType: numberKeyboard,
+                  validator: _validateBattery,
+                ),
+                const SizedBox(height: 12),
+                TextFormField(
+                  key: const ValueKey('vehicle_electricRange'),
+                  controller: _electricRange,
+                  decoration: const InputDecoration(
+                    labelText: 'Autonomia elétrica de referência',
+                    suffixText: 'km',
+                    helperText: 'Da ficha técnica ou do selo INMETRO.',
+                    border: OutlineInputBorder(),
+                  ),
+                  keyboardType: TextInputType.number,
+                  validator: _validateElectricRange,
+                ),
+                const SizedBox(height: 12),
+                TextFormField(
+                  key: const ValueKey('vehicle_kwhPrice'),
+                  controller: _kwhPrice,
+                  decoration: const InputDecoration(
+                    labelText: 'Preço padrão do kWh (opcional)',
+                    prefixText: 'R\$ ',
+                    helperText: 'A tarifa da sua conta de luz. Já vem preenchido em cada recarga; dá para mudar na hora.',
+                    helperMaxLines: 2,
+                    border: OutlineInputBorder(),
+                  ),
+                  keyboardType: numberKeyboard,
+                  validator: _validateKwhPrice,
+                ),
+              ],
+              const SizedBox(height: 12),
+              SwitchListTile(
+                key: const ValueKey('vehicle_autoUpdate'),
+                contentPadding: EdgeInsets.zero,
+                title: const Text('Atualizar referências com as minhas medições'),
+                subtitle: const Text(
+                  'Ligada, o consumo de referência (e a capacidade da bateria, no plug-in) passa a ser a média das suas '
+                  'últimas 5 medições. Os valores digitados ficam guardados e voltam se você desligar.',
+                ),
+                value: _autoUpdate,
+                onChanged: (v) => setState(() => _autoUpdate = v),
+              ),
               const SizedBox(height: 24),
               FilledButton(
                 key: const ValueKey('vehicle_save'),

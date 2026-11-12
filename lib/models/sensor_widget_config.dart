@@ -25,8 +25,8 @@ part 'sensor_widget_config.g.dart';
 /// driving_session_sample, 12-13 driving_session_event, 14 event_severity
 /// (`EventSeverity`, in `detected_event.dart`), 15 dashcam_clip_record, 16-18
 /// vehicle_profile (`FuelType`, `VehicleFuelSystem`, `VehicleProfile`), 19
-/// refuel_record.
-/// Next free typeId: 20.
+/// refuel_record, 20 vehicle_profile (`VehiclePropulsion`), 21 charge_record.
+/// Next free typeId: 22.
 enum SensorType {
   speed,
   inclination,

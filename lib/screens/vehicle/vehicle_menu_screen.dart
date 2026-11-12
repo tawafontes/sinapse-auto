@@ -39,8 +39,8 @@ class VehicleMenuScreen extends StatelessWidget {
                 ListTile(
                   key: const ValueKey('vehicleMenu_refuels'),
                   leading: const Icon(Icons.local_gas_station_outlined),
-                  title: const Text('Abastecimentos'),
-                  subtitle: const Text('Registrar e corrigir abastecimentos'),
+                  title: Text(profile?.isPlugIn ?? false ? 'Abastecimentos e recargas' : 'Abastecimentos'),
+                  subtitle: Text(profile?.isPlugIn ?? false ? 'Registrar e corrigir abastecimentos e recargas' : 'Registrar e corrigir abastecimentos'),
                   trailing: const Icon(Icons.chevron_right),
                   onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const RefuelListScreen())),
                 ),

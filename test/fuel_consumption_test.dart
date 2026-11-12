@@ -312,4 +312,33 @@ void main() {
       expect(parseDecimal('NaN'), isNull);
     });
   });
+
+  group('the km/L reference switch (2026-11-12)', () {
+    // Seven full-to-full gasoline intervals of 120 km, km/L 10, 11, …, 16.
+    final log = <RefuelRecord>[refuel('0', date: d(0), odometer: 1000, liters: 40)];
+    for (var i = 0; i < 7; i++) {
+      log.add(refuel('${i + 1}', date: d(i + 1), odometer: 1000 + 120.0 * (i + 1), liters: 120 / (10 + i)));
+    }
+    final summary = ConsumptionSummary.of(log);
+
+    test('on: the mean of the last 5 intervals of at least 100 km; off: the typed value', () {
+      final on = flexProfile();
+      expect(summary.referenceKmPerLiter(FuelType.gasoline, on), closeTo((12 + 13 + 14 + 15 + 16) / 5, 1e-9));
+      expect(summary.referenceIsMeasured(FuelType.gasoline, on), isTrue);
+      final off = flexProfile()..autoUpdateReferences = false;
+      expect(summary.referenceKmPerLiter(FuelType.gasoline, off), 12);
+      expect(summary.referenceIsMeasured(FuelType.gasoline, off), isFalse);
+      expect(summary.referenceKmPerLiter(FuelType.ethanol, on), 8.4, reason: 'no ethanol interval: the typed one');
+    });
+
+    test('short intervals do not update it, and a plug-in keeps the typed one here', () {
+      final short = ConsumptionSummary.of([
+        refuel('a', date: d(0), odometer: 1000, liters: 40),
+        refuel('b', date: d(1), odometer: 1080, liters: 4),
+      ]);
+      expect(short.referenceKmPerLiter(FuelType.gasoline, flexProfile()), 12);
+      final plugIn = flexProfile()..propulsion = VehiclePropulsion.plugInHybrid;
+      expect(summary.referenceKmPerLiter(FuelType.gasoline, plugIn), 12);
+    });
+  });
 }

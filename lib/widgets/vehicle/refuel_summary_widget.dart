@@ -4,6 +4,7 @@ import '../../models/vehicle_profile.dart';
 import '../../screens/vehicle/refuel_form_screen.dart';
 import '../../screens/vehicle/vehicle_profile_screen.dart';
 import '../../services/fuel_consumption.dart';
+import '../../services/hybrid_consumption.dart';
 import '../../services/vehicle_repository.dart';
 
 /// The dashboard's refuel widget (owner decision, 2026-11-11: the shortcut to
@@ -28,6 +29,7 @@ class _RefuelSummaryWidgetState extends State<RefuelSummaryWidget> {
   late final Listenable _changes = Listenable.merge([
     VehicleRepository.listenable(),
     RefuelRepository.listenable(),
+    ChargeRepository.listenable(),
     RefuelRepository.sessionsListenable(),
   ]);
 
@@ -38,6 +40,15 @@ class _RefuelSummaryWidgetState extends State<RefuelSummaryWidget> {
       builder: (context, _) {
         final profile = VehicleRepository.profile;
         final refuels = RefuelRepository.chronological;
+        void register() => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const RefuelFormScreen()));
+        if (profile != null && profile.isPlugIn) {
+          final charges = ChargeRepository.chronological;
+          return HybridSummaryView(
+            hasRecords: refuels.isNotEmpty || charges.isNotEmpty,
+            overview: HybridOverview.compute(profile: profile, refuels: refuels, charges: charges, sessions: RefuelRepository.sessions),
+            onRegister: register,
+          );
+        }
         return RefuelSummaryView(
           profile: profile,
           hasRefuels: refuels.isNotEmpty,
@@ -173,4 +184,84 @@ class RefuelSummaryView extends StatelessWidget {
           button,
         ],
       );
+}
+
+/// The refuel widget of a plug-in hybrid (2026-11-12): the estimated battery
+/// and electric range since the last recharge (the kilometres the app recorded
+/// since, all taken as electric), the fuel range last read off the panel, and
+/// the register button — which opens the form with "Abastecer | Recarregar".
+class HybridSummaryView extends StatelessWidget {
+  const HybridSummaryView({super.key, required this.hasRecords, required this.overview, this.onRegister});
+
+  final bool hasRecords;
+  final HybridOverview overview;
+  final VoidCallback? onRegister;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final percent = overview.batteryPercent;
+    final electric = overview.electricRangeKm;
+    final fuel = overview.panelFuelRangeKm;
+    final button = FilledButton.tonalIcon(
+      key: const ValueKey('refuelWidget_register'),
+      onPressed: onRegister,
+      icon: const Icon(Icons.ev_station),
+      label: const Text('Registrar'),
+    );
+    final Widget body = !hasRecords
+        ? Column(mainAxisSize: MainAxisSize.min, children: [
+            SizedBox(
+              width: 180,
+              child: Text('Nenhuma recarga ou abastecimento registrado', textAlign: TextAlign.center, style: theme.textTheme.bodyMedium),
+            ),
+            const SizedBox(height: 8),
+            button,
+          ])
+        : Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text('Elétrico', style: theme.textTheme.labelMedium),
+              Text(
+                electric == null ? '—' : '~${formatKm(electric)}',
+                key: const ValueKey('refuelWidget_electricRange'),
+                style: theme.textTheme.headlineMedium?.copyWith(fontWeight: FontWeight.w600),
+              ),
+              if (percent != null) ...[
+                const SizedBox(height: 6),
+                SizedBox(
+                  width: 160,
+                  child: LinearProgressIndicator(
+                    value: (percent / 100).clamp(0.0, 1.0),
+                    minHeight: 6,
+                    borderRadius: BorderRadius.circular(3),
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text('~${formatPercent(percent)} de bateria', key: const ValueKey('refuelWidget_batteryPercent'), style: theme.textTheme.bodySmall),
+              ],
+              const SizedBox(height: 8),
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.local_gas_station_outlined, size: 16),
+                  const SizedBox(width: 4),
+                  Text(
+                    fuel == null ? 'Combustão: —' : 'Combustão: ${formatKm(fuel)}',
+                    key: const ValueKey('refuelWidget_fuelRange'),
+                    style: theme.textTheme.bodySmall,
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              button,
+            ],
+          );
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(8),
+        child: FittedBox(fit: BoxFit.scaleDown, child: body),
+      ),
+    );
+  }
 }

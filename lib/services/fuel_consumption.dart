@@ -171,7 +171,34 @@ class ConsumptionSummary {
   /// km/L for [fuel]: what the user measured, else the profile's reference.
   double? kmPerLiterFor(FuelType fuel, VehicleProfile? profile) =>
       averageKmPerLiter(fuel) ?? profile?.referenceKmPerLiter(fuel);
+
+  /// The km/L reference reports compare against (owner decision, 2026-11-12):
+  /// with "Atualizar referências com as minhas medições" on, the mean of the
+  /// last [referenceSampleCountForFuel] intervals of at least 100 km that
+  /// burned [fuel] alone — the typed value until there are any; off, the typed
+  /// value. A plug-in's own reference comes from `HybridSummary`.
+  double? referenceKmPerLiter(FuelType fuel, VehicleProfile? profile) {
+    final typed = profile?.referenceKmPerLiter(fuel);
+    if (profile == null || !profile.autoUpdateReferences || profile.isPlugIn) return typed;
+    final samples = [
+      for (final i in intervals)
+        if (i.fuel == fuel && i.distanceKm >= 100) i.kmPerLiter,
+    ];
+    if (samples.isEmpty) return typed;
+    final last = samples.sublist(samples.length > referenceSampleCountForFuel ? samples.length - referenceSampleCountForFuel : 0);
+    return last.reduce((a, b) => a + b) / last.length;
+  }
+
+  /// Whether [referenceKmPerLiter] is a measured one rather than the typed one.
+  bool referenceIsMeasured(FuelType fuel, VehicleProfile? profile) =>
+      profile != null &&
+      profile.autoUpdateReferences &&
+      !profile.isPlugIn &&
+      intervals.any((i) => i.fuel == fuel && i.distanceKm >= 100);
 }
+
+/// How many recent intervals a self-updating km/L reference averages.
+const int referenceSampleCountForFuel = 5;
 
 /// Ethanol pays off while its price is at most [ratio] times gasoline's.
 /// [measured] says whether [ratio] comes from the user's own intervals with
@@ -209,19 +236,22 @@ double appDistanceKmSince(DateTime since, Iterable<DrivingSession> sessions) {
   return meters / 1000;
 }
 
-/// The odometer the refuel form suggests (owner decision, 2026-11-11): the last
-/// refuel's odometer plus the kilometres the app recorded since. `null` before
-/// the first refuel — there is nothing to add to.
-double? suggestedOdometerKm(RefuelRecord? lastRefuel, double appKmSinceLast) =>
-    lastRefuel == null ? null : (lastRefuel.odometerKm + appKmSinceLast).roundToDouble();
+/// The odometer the refuel and recharge forms suggest (owner decision,
+/// 2026-11-11): the last record's odometer — refuel or recharge — plus the
+/// kilometres the app recorded since. `null` before the first record — there
+/// is nothing to add to.
+double? suggestedOdometerKm(OdometerRecord? lastRecord, double appKmSinceLast) =>
+    lastRecord == null ? null : (lastRecord.odometerKm + appKmSinceLast).roundToDouble();
 
-/// Why [odometerKm] cannot be the odometer of a refuel on [date], or `null`
+String _ofRecordKind(OdometerRecord record) => record is RefuelRecord ? 'do abastecimento' : 'da recarga';
+
+/// Why [odometerKm] cannot be the odometer of a record on [date], or `null`
 /// when it fits: the odometer only grows, so it must be above every earlier
-/// refuel's and below every later one's. [others] excludes the refuel being
-/// edited.
-String? odometerConflict(double odometerKm, DateTime date, Iterable<RefuelRecord> others) {
-  RefuelRecord? previous;
-  RefuelRecord? next;
+/// record's and below every later one's — refuels and recharges alike.
+/// [others] excludes the record being edited.
+String? odometerConflict(double odometerKm, DateTime date, Iterable<OdometerRecord> others) {
+  OdometerRecord? previous;
+  OdometerRecord? next;
   for (final other in others) {
     if (!other.date.isAfter(date)) {
       if (previous == null || other.date.isAfter(previous.date)) previous = other;
@@ -230,10 +260,10 @@ String? odometerConflict(double odometerKm, DateTime date, Iterable<RefuelRecord
     }
   }
   if (previous != null && odometerKm <= previous.odometerKm) {
-    return 'O hodômetro precisa ser maior que o do abastecimento anterior (${formatKm(previous.odometerKm)}).';
+    return 'O hodômetro precisa ser maior que o ${_ofRecordKind(previous)} anterior (${formatKm(previous.odometerKm)}).';
   }
   if (next != null && odometerKm >= next.odometerKm) {
-    return 'O hodômetro precisa ser menor que o do abastecimento seguinte (${formatKm(next.odometerKm)}).';
+    return 'O hodômetro precisa ser menor que o ${_ofRecordKind(next)} seguinte (${formatKm(next.odometerKm)}).';
   }
   return null;
 }

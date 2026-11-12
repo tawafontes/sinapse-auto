@@ -3,7 +3,9 @@ import 'package:flutter/material.dart';
 import '../../models/refuel_record.dart';
 import '../../models/vehicle_profile.dart';
 import '../../services/fuel_consumption.dart';
+import '../../services/hybrid_consumption.dart';
 import '../../services/vehicle_repository.dart';
+import 'charge_form_screen.dart';
 import 'vehicle_profile_screen.dart';
 
 /// Registers (or corrects, given [editing]) one refuel — owner decisions of
@@ -34,6 +36,9 @@ class _RefuelFormScreenState extends State<RefuelFormScreen> {
   FuelType? _fuel;
   double? _suggestion;
   double _appKmSinceLast = 0;
+  bool _usedFuel = false;
+  late final TextEditingController _rangeBefore;
+  late final TextEditingController _rangeAfter;
   bool _saving = false;
 
   @override
@@ -45,14 +50,18 @@ class _RefuelFormScreenState extends State<RefuelFormScreen> {
     _fullTank = editing?.fullTank ?? true;
     _fuel = editing?.fuel ?? profile?.defaultFuel;
     if (editing == null) {
-      final refuels = RefuelRepository.chronological;
-      final last = refuels.isEmpty ? null : refuels.last;
+      // Refuels and recharges alike: the odometer suggestion and its check
+      // span both kinds.
+      final last = latestRecord(allVehicleRecords());
       if (last != null) _appKmSinceLast = appDistanceKmSince(last.date, RefuelRepository.sessions);
       _suggestion = suggestedOdometerKm(last, _appKmSinceLast);
     }
     _odometer = TextEditingController(text: editableNumber(editing?.odometerKm ?? _suggestion));
     _liters = TextEditingController(text: editableNumber(editing?.liters));
     _price = TextEditingController(text: editableNumber(editing?.pricePerLiter));
+    _usedFuel = editing?.usedFuelSinceLast ?? false;
+    _rangeBefore = TextEditingController(text: editableNumber(editing?.panelFuelRangeBeforeKm));
+    _rangeAfter = TextEditingController(text: editableNumber(editing?.panelFuelRangeAfterKm));
     _liters.addListener(_onAmountsChanged);
     _price.addListener(_onAmountsChanged);
   }
@@ -62,6 +71,8 @@ class _RefuelFormScreenState extends State<RefuelFormScreen> {
     _odometer.dispose();
     _liters.dispose();
     _price.dispose();
+    _rangeBefore.dispose();
+    _rangeAfter.dispose();
     super.dispose();
   }
 
@@ -73,7 +84,7 @@ class _RefuelFormScreenState extends State<RefuelFormScreen> {
     return liters == null || price == null ? null : liters * price;
   }
 
-  Iterable<RefuelRecord> get _others => RefuelRepository.chronological.where((r) => r.id != widget.editing?.id);
+  Iterable<OdometerRecord> get _others => allVehicleRecords().where((r) => r.id != widget.editing?.id);
 
   Future<void> _pickDate() async {
     final now = DateTime.now();
@@ -114,11 +125,22 @@ class _RefuelFormScreenState extends State<RefuelFormScreen> {
     return null;
   }
 
+  /// Plug-in only: a fuel range read off the panel.
+  String? _validateRange(String? text, {required bool required}) {
+    final trimmed = text?.trim() ?? '';
+    if (trimmed.isEmpty) return required ? 'Informe a autonomia a combustão que o painel mostra.' : null;
+    final value = parseDecimal(trimmed, dotGroupsThousands: true);
+    if (value == null || value < 0 || value > 3000) return 'Autonomia inválida.';
+    return null;
+  }
+
   Future<void> _save() async {
     if (_saving || !_formKey.currentState!.validate()) return;
     final fuel = _fuel;
     if (fuel == null) return;
     setState(() => _saving = true);
+    final plugIn = VehicleRepository.profile?.isPlugIn ?? false;
+    double? range(TextEditingController c) => c.text.trim().isEmpty ? null : parseDecimal(c.text, dotGroupsThousands: true);
     await RefuelRepository.save(RefuelRecord(
       id: widget.editing?.id ?? RefuelRepository.newId(),
       date: _date,
@@ -127,6 +149,9 @@ class _RefuelFormScreenState extends State<RefuelFormScreen> {
       pricePerLiter: parseDecimal(_price.text)!,
       fuel: fuel,
       fullTank: _fullTank,
+      usedFuelSinceLast: plugIn ? _usedFuel : null,
+      panelFuelRangeBeforeKm: plugIn && _usedFuel ? range(_rangeBefore) : null,
+      panelFuelRangeAfterKm: plugIn ? range(_rangeAfter) : null,
     ));
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
@@ -190,6 +215,10 @@ class _RefuelFormScreenState extends State<RefuelFormScreen> {
           child: ListView(
             padding: const EdgeInsets.all(16),
             children: [
+              if (profile.isPlugIn && widget.editing == null) ...[
+                const EnergyKindToggle(charging: false),
+                const SizedBox(height: 12),
+              ],
               ListTile(
                 key: const ValueKey('refuel_date'),
                 contentPadding: EdgeInsets.zero,
@@ -210,7 +239,7 @@ class _RefuelFormScreenState extends State<RefuelFormScreen> {
                   helperMaxLines: 3,
                   helperText: suggestion == null
                       ? 'Digite o valor que aparece no painel do carro.'
-                      : 'Sugestão: último abastecimento + ${formatKm(_appKmSinceLast)} registrados pelo app. '
+                      : 'Sugestão: último registro + ${formatKm(_appKmSinceLast)} registrados pelo app. '
                           'Confira no painel do carro.',
                 ),
                 keyboardType: TextInputType.number,
@@ -281,6 +310,45 @@ class _RefuelFormScreenState extends State<RefuelFormScreen> {
                 value: _fullTank,
                 onChanged: (v) => setState(() => _fullTank = v),
               ),
+              if (profile.isPlugIn) ...[
+                const SizedBox(height: 8),
+                Text('Autonomia a combustão no painel', style: theme.textTheme.titleSmall),
+                const SizedBox(height: 4),
+                Text(
+                  'Leia com o carro parado em local plano. A queda dessa autonomia entre registros mostra quantos km '
+                  'foram feitos a combustão — o resto foi elétrico.',
+                  style: theme.textTheme.bodySmall,
+                ),
+                SwitchListTile(
+                  key: const ValueKey('refuel_usedFuel'),
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Usou combustível desde o último registro?'),
+                  value: _usedFuel,
+                  onChanged: (v) => setState(() => _usedFuel = v),
+                ),
+                if (_usedFuel) ...[
+                  TextFormField(
+                    key: const ValueKey('refuel_rangeBefore'),
+                    controller: _rangeBefore,
+                    decoration: const InputDecoration(labelText: 'Antes de abastecer', suffixText: 'km', border: OutlineInputBorder()),
+                    keyboardType: TextInputType.number,
+                    validator: (t) => _validateRange(t, required: true),
+                  ),
+                  const SizedBox(height: 12),
+                ],
+                TextFormField(
+                  key: const ValueKey('refuel_rangeAfter'),
+                  controller: _rangeAfter,
+                  decoration: const InputDecoration(
+                    labelText: 'Depois de abastecer',
+                    suffixText: 'km',
+                    helperText: 'O ponto de partida para os próximos registros.',
+                    border: OutlineInputBorder(),
+                  ),
+                  keyboardType: TextInputType.number,
+                  validator: (t) => _validateRange(t, required: false),
+                ),
+              ],
               const SizedBox(height: 24),
               FilledButton(
                 key: const ValueKey('refuel_save'),

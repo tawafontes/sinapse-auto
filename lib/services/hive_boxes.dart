@@ -1,5 +1,6 @@
 import 'package:hive_flutter/hive_flutter.dart';
 
+import '../models/charge_record.dart';
 import '../models/dashcam_clip_record.dart';
 import '../models/dashcam_config.dart';
 import '../models/detected_event.dart';
@@ -57,6 +58,10 @@ class HiveBoxNames {
   /// the refuel list, the consumption report and the dashboard widget read
   /// without touching the disk.
   static const refuelRecords = 'refuel_records';
+
+  /// Every [ChargeRecord] of a plug-in hybrid, keyed by its id — kept apart from
+  /// the refuels so the fuel consumption math never mixes in energy.
+  static const chargeRecords = 'charge_records';
 }
 
 /// Initializes Hive, registers every model's [TypeAdapter] and opens the
@@ -95,6 +100,8 @@ class HiveBoxes {
     Hive.registerAdapter(VehicleFuelSystemAdapter());
     Hive.registerAdapter(VehicleProfileAdapter());
     Hive.registerAdapter(RefuelRecordAdapter());
+    Hive.registerAdapter(VehiclePropulsionAdapter());
+    Hive.registerAdapter(ChargeRecordAdapter());
 
     await Future.wait([
       Hive.openBox<SensorWidgetConfig>(HiveBoxNames.sensorWidgetConfigs),
@@ -107,6 +114,7 @@ class HiveBoxes {
       Hive.openBox(HiveBoxNames.dashcamSessionVideos),
       Hive.openBox<VehicleProfile>(HiveBoxNames.vehicleProfile),
       Hive.openBox<RefuelRecord>(HiveBoxNames.refuelRecords),
+      Hive.openBox<ChargeRecord>(HiveBoxNames.chargeRecords),
     ]);
 
     _initialized = true;
