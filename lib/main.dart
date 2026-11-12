@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 
 import 'screens/dashboard/dashboard_screen.dart';
@@ -139,6 +140,13 @@ class _SynapseAutoAppState extends State<SynapseAutoApp> with WidgetsBindingObse
                   builder: (context, _) {
                     return MaterialApp(
                       title: 'Synapse Auto',
+                      // The app is written in Brazilian Portuguese only, so the
+                      // framework's own texts (the refuel form's date picker,
+                      // dialog buttons, tooltips) follow it regardless of the
+                      // phone's language.
+                      locale: const Locale('pt', 'BR'),
+                      supportedLocales: const [Locale('pt', 'BR')],
+                      localizationsDelegates: GlobalMaterialLocalizations.delegates,
                       theme: _themeController.themeData,
                       home: onboardingDone ? const DashboardScreen() : const WelcomeScreen(),
                     );
