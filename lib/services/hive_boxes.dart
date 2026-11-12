@@ -6,8 +6,10 @@ import '../models/detected_event.dart';
 import '../models/driving_session.dart';
 import '../models/driving_session_event.dart';
 import '../models/driving_session_sample.dart';
+import '../models/refuel_record.dart';
 import '../models/sensor_widget_config.dart';
 import '../models/theme_config.dart';
+import '../models/vehicle_profile.dart';
 
 /// Box names used across the app. Kept centralized so screens/services never
 /// need to hardcode a string.
@@ -46,6 +48,15 @@ class HiveBoxNames {
   /// eagerly resident lets the History list check "does this session have
   /// video?" via a plain hashmap lookup, no disk read, no `FutureBuilder`.
   static const dashcamSessionVideos = 'dashcam_session_videos';
+
+  /// The single [VehicleProfile] ("Meu veículo"), under [VehicleRepository]'s
+  /// fixed key.
+  static const vehicleProfile = 'vehicle_profile';
+
+  /// Every [RefuelRecord], keyed by its id — a few per month, so a plain box
+  /// the refuel list, the consumption report and the dashboard widget read
+  /// without touching the disk.
+  static const refuelRecords = 'refuel_records';
 }
 
 /// Initializes Hive, registers every model's [TypeAdapter] and opens the
@@ -80,6 +91,11 @@ class HiveBoxes {
     Hive.registerAdapter(EventSeverityAdapter());
     Hive.registerAdapter(DrivingSessionEventAdapter());
 
+    Hive.registerAdapter(FuelTypeAdapter());
+    Hive.registerAdapter(VehicleFuelSystemAdapter());
+    Hive.registerAdapter(VehicleProfileAdapter());
+    Hive.registerAdapter(RefuelRecordAdapter());
+
     await Future.wait([
       Hive.openBox<SensorWidgetConfig>(HiveBoxNames.sensorWidgetConfigs),
       Hive.openBox<DashcamConfig>(HiveBoxNames.dashcamConfig),
@@ -89,6 +105,8 @@ class HiveBoxes {
       Hive.openBox<DrivingSession>(HiveBoxNames.drivingSessions),
       Hive.openLazyBox(HiveBoxNames.drivingSessionSamples),
       Hive.openBox(HiveBoxNames.dashcamSessionVideos),
+      Hive.openBox<VehicleProfile>(HiveBoxNames.vehicleProfile),
+      Hive.openBox<RefuelRecord>(HiveBoxNames.refuelRecords),
     ]);
 
     _initialized = true;

@@ -6,6 +6,7 @@ const Map<DisplayStyle, String> displayStyleLabels = {
   DisplayStyle.lineChart: 'Gráfico de linha',
   DisplayStyle.gForceMeter: 'G-force meter',
   DisplayStyle.artificialHorizon: 'Horizonte artificial',
+  DisplayStyle.refuelSummary: 'Autonomia e abastecimento',
 };
 
 /// Which [DisplayStyle]s a given [SensorType] can be rendered with, in the
@@ -16,4 +17,5 @@ const Map<SensorType, List<DisplayStyle>> validDisplayStylesForSensor = {
   SensorType.inclination: [DisplayStyle.artificialHorizon],
   SensorType.altitude: [DisplayStyle.lineChart],
   SensorType.gForce: [DisplayStyle.gForceMeter],
+  SensorType.refuel: [DisplayStyle.refuelSummary],
 };

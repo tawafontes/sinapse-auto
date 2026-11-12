@@ -141,6 +141,8 @@ class DisplayStyleAdapter extends TypeAdapter<DisplayStyle> {
         return DisplayStyle.gForceMeter;
       case 8:
         return DisplayStyle.artificialHorizon;
+      case 9:
+        return DisplayStyle.refuelSummary;
       default:
         return DisplayStyle.numericWithHistory;
     }
@@ -160,6 +162,9 @@ class DisplayStyleAdapter extends TypeAdapter<DisplayStyle> {
         break;
       case DisplayStyle.artificialHorizon:
         writer.writeByte(8);
+        break;
+      case DisplayStyle.refuelSummary:
+        writer.writeByte(9);
         break;
     }
   }

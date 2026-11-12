@@ -23,13 +23,19 @@ part 'sensor_widget_config.g.dart';
 /// registered together in [HiveBoxes.init]): 0-4 sensor_widget_config,
 /// 5-7 dashcam_config, 8-9 theme_config, 10 driving_session, 11
 /// driving_session_sample, 12-13 driving_session_event, 14 event_severity
-/// (`EventSeverity`, in `detected_event.dart`), 15 dashcam_clip_record.
-/// Next free typeId: 16.
+/// (`EventSeverity`, in `detected_event.dart`), 15 dashcam_clip_record, 16-18
+/// vehicle_profile (`FuelType`, `VehicleFuelSystem`, `VehicleProfile`), 19
+/// refuel_record.
+/// Next free typeId: 20.
 enum SensorType {
   speed,
   inclination,
   altitude,
   gForce,
+
+  /// The refuel shortcut and range estimate (2026-11-12) — fed by the refuel
+  /// log and the vehicle profile, not by a physical sensor.
+  refuel,
 
   /// Sentinel returned by [SensorTypeAdapter.read] for a stored byte that
   /// doesn't match any case above. Never chosen by the user or written back
@@ -60,6 +66,8 @@ class SensorTypeAdapter extends TypeAdapter<SensorType> {
         return SensorType.altitude;
       case 4:
         return SensorType.gForce;
+      case 5:
+        return SensorType.refuel;
       default:
         return SensorType.unknown;
     }
@@ -79,6 +87,9 @@ class SensorTypeAdapter extends TypeAdapter<SensorType> {
         break;
       case SensorType.gForce:
         writer.writeByte(4);
+        break;
+      case SensorType.refuel:
+        writer.writeByte(5);
         break;
       case SensorType.unknown:
         throw ArgumentError('SensorType.unknown must never be persisted');
@@ -122,6 +133,8 @@ enum DisplayStyle {
   gForceMeter,
   @HiveField(8)
   artificialHorizon,
+  @HiveField(9)
+  refuelSummary,
 }
 
 /// Normalized position of a widget on the dashboard grid (0.0 - 1.0 range,

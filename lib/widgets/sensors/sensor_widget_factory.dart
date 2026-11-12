@@ -5,6 +5,7 @@ import '../../models/unit_system.dart';
 import '../../services/dashboard_sensor_streams.dart';
 import '../../services/sensor_records.dart';
 import '../../services/unit_preferences.dart';
+import '../vehicle/refuel_summary_widget.dart';
 import 'artificial_horizon.dart';
 import 'g_force_meter.dart';
 import 'line_chart.dart';
@@ -153,5 +154,10 @@ Widget buildDashboardSensorWidget(
             ? null
             : (trigger) => onImmediateResetRequested(sensorType, trigger),
       );
+    case DisplayStyle.refuelSummary:
+      // Not a telemetry consumer: reads the refuel log and the vehicle profile
+      // from Hive (see RefuelSummaryWidget). Nothing to reset or calibrate, so
+      // it registers no reset trigger.
+      return const RefuelSummaryWidget();
   }
 }

@@ -15,6 +15,7 @@ import 'dashcam_settings_screen.dart';
 import 'diagnostics_screen.dart';
 import 'power_profile_screen.dart';
 import 'units_screen.dart';
+import '../vehicle/vehicle_menu_screen.dart';
 
 /// Reached via the gear icon on the dashboard. Reopens the same theme
 /// screen used during onboarding — it already reads its current state from
@@ -183,6 +184,16 @@ class SettingsMenuScreen extends StatelessWidget {
               trailing: const Icon(Icons.chevron_right),
               onTap: () => Navigator.of(context).push(
                 MaterialPageRoute(builder: (_) => const DashcamSettingsScreen()),
+              ),
+            ),
+            ListTile(
+              key: const ValueKey('settings_vehicle'),
+              leading: const Icon(Icons.directions_car_outlined),
+              title: const Text('Veículo'),
+              subtitle: const Text('Meu veículo, abastecimentos e relatórios de consumo'),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const VehicleMenuScreen()),
               ),
             ),
             ListTile(

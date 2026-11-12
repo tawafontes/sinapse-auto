@@ -5,6 +5,7 @@ import '../../widgets/sensors/artificial_horizon.dart';
 import '../../widgets/sensors/g_force_meter.dart';
 import '../../widgets/sensors/line_chart.dart';
 import '../../widgets/sensors/mock_preview_data.dart';
+import '../../widgets/vehicle/refuel_summary_widget.dart';
 
 /// A single selectable style option: a live mock preview over a label,
 /// highlighted when selected. Shared by [StyleSelectionScreen] (onboarding's
@@ -91,5 +92,9 @@ Widget buildStylePreview(SensorType sensorType, DisplayStyle style) {
       // never shown as a step here — kept only for DisplayStyle's switch
       // exhaustiveness.
       return ArtificialHorizon(pitchRollStream: MockPreviewData.tiltOffset().map((o) => o * 45));
+    case DisplayStyle.refuelSummary:
+      // Unreachable via the UI, like the cases above: the refuel widget has
+      // only this style.
+      return RefuelSummaryView.preview();
   }
 }

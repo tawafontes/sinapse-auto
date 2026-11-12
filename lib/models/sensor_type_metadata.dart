@@ -19,4 +19,5 @@ const Map<SensorType, SensorTypeMetadata> sensorTypeMetadata = {
   SensorType.inclination: SensorTypeMetadata(label: 'Inclinação', icon: Icons.architecture, unit: '°'),
   SensorType.altitude: SensorTypeMetadata(label: 'Altitude', icon: Icons.terrain, unit: 'm'),
   SensorType.gForce: SensorTypeMetadata(label: 'Aceleração G', icon: Icons.bolt, unit: 'g'),
+  SensorType.refuel: SensorTypeMetadata(label: 'Abastecimento', icon: Icons.local_gas_station, unit: 'km'),
 };

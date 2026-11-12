@@ -82,4 +82,5 @@ const Map<SensorType, Color> perWidgetAccentColors = {
   SensorType.inclination: Color(0xFF3F51B5),
   SensorType.altitude: Color(0xFF009688),
   SensorType.gForce: Color(0xFFF44336),
+  SensorType.refuel: Color(0xFFFF9800),
 };
