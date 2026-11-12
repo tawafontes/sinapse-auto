@@ -37,6 +37,7 @@ import java.util.concurrent.RejectedExecutionException
 class MainActivity : FlutterActivity() {
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        obdBridge = ObdBridge(applicationContext, flutterEngine.dartExecutor.binaryMessenger)
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, STORAGE_CHANNEL).setMethodCallHandler { call, result ->
             when (call.method) {
                 "volumeStats" -> {
@@ -238,8 +239,13 @@ class MainActivity : FlutterActivity() {
         // Pending copies are dropped with the activity; their clips stay in the
         // private folder (only the gallery copy of those segments is missed).
         galleryExecutor.shutdown()
+        obdBridge?.dispose()
+        obdBridge = null
         super.onDestroy()
     }
+
+    /** OBD-II phase 0 link (see [ObdBridge]). */
+    private var obdBridge: ObdBridge? = null
 
     private val galleryExecutor: ExecutorService = Executors.newSingleThreadExecutor()
     private val mainHandler = Handler(Looper.getMainLooper())

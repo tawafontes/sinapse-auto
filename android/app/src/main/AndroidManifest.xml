@@ -5,6 +5,11 @@
     <uses-permission android:name="android.permission.RECORD_AUDIO"/>
     <uses-permission android:name="android.permission.WAKE_LOCK"/>
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+    <!-- OBD-II (Vgate iCar Pro, Bluetooth Classic): connect to an already-paired
+         adapter. No scan, so no BLUETOOTH_SCAN and no location for Bluetooth. -->
+    <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30"/>
+    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30"/>
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT"/>
     <!-- Dashcam clips copied to the gallery: needed only before Android 10. From
          Android 10 on, MediaStore adds the app's own videos without any permission. -->
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28"/>

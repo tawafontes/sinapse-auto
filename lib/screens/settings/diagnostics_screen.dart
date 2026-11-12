@@ -8,6 +8,7 @@ import '../../services/altitude_trend.dart';
 import '../../services/dashboard_sensor_streams.dart';
 import '../../services/gnss_quality.dart';
 import '../../services/unit_preferences.dart';
+import 'obd_phase0_screen.dart';
 
 /// Portuguese label for how much a GNSS-derived reading (speed, heading)
 /// should be trusted, derived from the same [GnssQuality] that already
@@ -280,6 +281,16 @@ class _DiagnosticsScreenState extends State<DiagnosticsScreen> {
                 _DiagnosticRow('Pitch', _pitchDegrees == null ? '—' : '${_pitchDegrees!.toStringAsFixed(1)}°'),
                 _DiagnosticRow('Roll', _rollDegrees == null ? '—' : '${_rollDegrees!.toStringAsFixed(1)}°'),
               ],
+            ),
+            // OBD-II phase 0 (2026-11-12): the adapter test tool, kept out of
+            // the regular menus until the OBD-II service exists.
+            ListTile(
+              key: const ValueKey('diagnostics_obdPhase0'),
+              leading: const Icon(Icons.bluetooth_searching),
+              title: const Text('Teste do adaptador OBD-II'),
+              subtitle: const Text('Fase 0: lê o carro e grava a transcrição'),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const ObdPhase0Screen())),
             ),
           ],
         ),
