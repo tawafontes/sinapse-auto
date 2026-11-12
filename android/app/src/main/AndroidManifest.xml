@@ -9,7 +9,7 @@
          Android 10 on, MediaStore adds the app's own videos without any permission. -->
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28"/>
     <application
-        android:label="synapse_auto"
+        android:label="Synapse Auto"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity
