@@ -14,6 +14,7 @@ import '../../services/app_settings.dart';
 import '../../services/dashboard_alerts.dart';
 import '../../services/dashboard_layout_engine.dart';
 import '../../services/dashboard_maintenance_service.dart';
+import '../../services/dashboard_orientation_layout.dart';
 import '../../services/driving_session_host.dart';
 import '../../services/sensor_widget_repository.dart';
 import '../../services/theme_controller.dart';
@@ -209,7 +210,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
   DrivingSessionHost get _session => _host!;
 
   late final PageController _pageController;
+  /// The layout on screen: the stored configs in portrait, their
+  /// [LandscapeWidgetLayout]s in landscape (see [_switchLayout]) — everything
+  /// below works on these the same way in both orientations.
   late List<SensorWidgetConfig> _configs;
+  Orientation _layoutOrientation = Orientation.portrait;
+  bool get _isLandscape => _layoutOrientation == Orientation.landscape;
   late int _currentPage;
   GridDimensions? _lastGrid;
 
@@ -370,8 +376,39 @@ class _DashboardScreenState extends State<DashboardScreen> {
   /// anything lands on it) — see [AppSettings.dashboardPageCount].
   int get _pageCount {
     final derived = _configs.isEmpty ? 1 : (_configs.map((c) => c.page).reduce((a, b) => a > b ? a : b) + 1);
-    final persisted = AppSettings.dashboardPageCount;
+    final persisted = _isLandscape ? AppSettings.dashboardLandscapePageCount : AppSettings.dashboardPageCount;
     return (derived > persisted ? derived : persisted).clamp(1, _maxPages);
+  }
+
+  Future<void> _setPersistedPageCount(int count) =>
+      _isLandscape ? AppSettings.setDashboardLandscapePageCount(count) : AppSettings.setDashboardPageCount(count);
+
+  /// Turning the phone swaps the layout on screen (owner request, 2026-11-12):
+  /// landscape has its own grid, sizes and pages (see [gridDimensionsFor] and
+  /// [LandscapeWidgetLayout]), so the portrait arrangement is neither squashed
+  /// nor overwritten. Runs from [build], before the tiles are built from
+  /// [_configs]; an edit or drag in progress does not carry over to the other
+  /// layout. The tiles keep their [GlobalKey]s (by sensor), so each widget's
+  /// own state — a chart's history — survives the rotation.
+  void _switchLayout(Orientation orientation) {
+    _layoutOrientation = orientation;
+    _configs = dashboardLayoutFor(orientation, SensorWidgetRepository.all);
+    _editingConfig = null;
+    _resizeGhostRect = null;
+    _dragReflowPreview = null;
+    if (_draggingConfig != null) {
+      _draggingConfig = null;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _cancelEdgeHover();
+      });
+    }
+    final lastPage = _pageCount - 1;
+    if (_currentPage > lastPage) {
+      _currentPage = lastPage;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && _pageController.hasClients) _pageController.jumpToPage(_currentPage);
+      });
+    }
   }
 
   void _setAlertColor(SensorType type, Color? color) {
@@ -1077,7 +1114,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   /// for the [_maxPages] check: the sheet already hides its own "+" at the
   /// cap, and [_hoverPageSwitch] checks explicitly since dragging has no
   /// equivalent UI affordance to hide.
-  Future<void> _createNewPage() => AppSettings.setDashboardPageCount(_pageCount + 1);
+  Future<void> _createNewPage() => _setPersistedPageCount(_pageCount + 1);
 
   Future<void> _addPageFromSheet() async {
     await _createNewPage();
@@ -1091,9 +1128,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
   /// page was at or before the one being viewed, persisting that too so a
   /// restart reopens on the same page.
   Future<void> _deletePage(int page) async {
-    final deletedTypes = await SensorWidgetRepository.deleteConfigsOnPage(page);
-    await SensorWidgetRepository.shiftPagesAfterDelete(page);
-    await AppSettings.setDashboardPageCount((AppSettings.dashboardPageCount - 1).clamp(1, _maxPages));
+    // The page of the layout on screen: in landscape, the landscape pages.
+    final layout = [..._configs];
+    final deletedTypes = await SensorWidgetRepository.deleteConfigsOnPage(page, configs: layout);
+    await SensorWidgetRepository.shiftPagesAfterDelete(page, configs: layout.where((c) => !deletedTypes.contains(c.sensorType)));
+    final persisted = _isLandscape ? AppSettings.dashboardLandscapePageCount : AppSettings.dashboardPageCount;
+    await _setPersistedPageCount((persisted - 1).clamp(1, _maxPages));
     if (!mounted) return;
     setState(() {
       _configs.removeWhere((c) => deletedTypes.contains(c.sensorType));
@@ -1146,6 +1186,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   @override
   Widget build(BuildContext context) {
     final orientation = MediaQuery.orientationOf(context);
+    if (orientation != _layoutOrientation) _switchLayout(orientation);
     final grid = gridDimensionsFor(orientation);
     if (_lastGrid != grid) {
       _lastGrid = grid;
@@ -1301,9 +1342,16 @@ class _DashboardScreenState extends State<DashboardScreen> {
     // page's own grid — it's rendered exactly once, as a permanent sibling
     // of the whole PageView (see build) — so every page here only ever shows
     // its *other*, non-dragged widgets.
+    //
+    // A widget not placed yet (the (-1, -1) sentinel of a widget just added,
+    // or of every widget the first time the dashboard is shown in landscape —
+    // see LandscapeWidgetLayout) is not drawn: [_reconcileAndPlace] places it
+    // after this frame. Drawn as it stands it would be a 1x1 tile, and in
+    // landscape one column (~110 dp) is narrower than the artificial horizon's
+    // and the G-force meter's readouts — they overflowed for that one frame.
     final pageConfigs = [
       for (final config in _configs)
-        if (config.page == pageIndex && config != _draggingConfig) config,
+        if (config.page == pageIndex && config != _draggingConfig && config.position.x >= 0 && config.position.y >= 0) config,
     ];
     // Prefers the live reflow preview, so a displaced tile visibly scoots to
     // its tentative new spot while the drag is still in progress.

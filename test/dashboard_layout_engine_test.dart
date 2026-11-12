@@ -1,3 +1,4 @@
+import 'package:flutter/widgets.dart' show Orientation;
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:synapse_auto/models/sensor_widget_config.dart';
@@ -308,11 +309,13 @@ void main() {
 
   group('restore original size (2026-11-11)', () {
     const portrait = (columns: 4, rows: 6);
-    const landscape = (columns: 6, rows: 4);
+    const landscape = (columns: 8, rows: 3);
 
-    test('the original size is the 2x2 a new widget gets', () {
+    test('the original size is the 2x2 a new widget gets in portrait, 2 x full height in landscape', () {
       expect(defaultWidgetSize(portrait), (width: 2, height: 2));
-      expect(defaultWidgetSize(landscape), (width: 2, height: 2));
+      expect(defaultWidgetSize(landscape), (width: 2, height: 3), reason: '2026-11-12: not squashed in landscape');
+      expect(gridDimensionsFor(Orientation.landscape), landscape);
+      expect(gridDimensionsFor(Orientation.portrait), portrait);
       expect(hasDefaultWidgetSize((x: 1, y: 3, width: 2, height: 2), portrait), isTrue);
       expect(hasDefaultWidgetSize((x: 0, y: 0, width: 4, height: 2), portrait), isFalse);
       expect(hasDefaultWidgetSize((x: 0, y: 0, width: 2, height: 3), portrait), isFalse);

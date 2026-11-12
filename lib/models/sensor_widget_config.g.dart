@@ -96,13 +96,16 @@ class SensorWidgetConfigAdapter extends TypeAdapter<SensorWidgetConfig> {
       position: fields[2] as WidgetPosition,
       size: fields[3] as WidgetSize,
       page: fields[4] == null ? 0 : fields[4] as int,
-    );
+    )
+      ..landscapePosition = fields[5] as WidgetPosition?
+      ..landscapeSize = fields[6] as WidgetSize?
+      ..landscapePage = fields[7] as int?;
   }
 
   @override
   void write(BinaryWriter writer, SensorWidgetConfig obj) {
     writer
-      ..writeByte(5)
+      ..writeByte(8)
       ..writeByte(0)
       ..write(obj.sensorType)
       ..writeByte(1)
@@ -112,7 +115,13 @@ class SensorWidgetConfigAdapter extends TypeAdapter<SensorWidgetConfig> {
       ..writeByte(3)
       ..write(obj.size)
       ..writeByte(4)
-      ..write(obj.page);
+      ..write(obj.page)
+      ..writeByte(5)
+      ..write(obj.landscapePosition)
+      ..writeByte(6)
+      ..write(obj.landscapeSize)
+      ..writeByte(7)
+      ..write(obj.landscapePage);
   }
 
   @override

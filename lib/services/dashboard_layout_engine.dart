@@ -3,15 +3,26 @@ import 'package:flutter/widgets.dart' show Orientation;
 import '../models/sensor_widget_config.dart';
 import '../models/widget_size_bounds.dart';
 
-/// Grid shape for the current orientation — 6x4 landscape, 4x6 portrait, per
-/// the spec. A record, so it gets structural equality for free.
+/// Grid shape for the current orientation. A record, so it gets structural
+/// equality for free.
 typedef GridDimensions = ({int columns, int rows});
 
+/// 4x6 in portrait. 8x3 in landscape (owner request, 2026-11-12 — it used to be
+/// 6x4): a phone held sideways leaves a short, wide area under the app bar
+/// (S23 Ultra: ~880 x ~310 dp), so 6x4 made each cell ~147 x 77 dp and every
+/// widget came out squashed, twice as wide as tall. 8x3 makes the cells close
+/// to square (~110 x 103 dp), and a widget defaults to the full height (see
+/// [defaultWidgetSize]) — four of them side by side, each about as tall for its
+/// width as in portrait. Landscape keeps a layout of its own (see
+/// `LandscapeWidgetLayout`), so the two grids never have to agree.
 GridDimensions gridDimensionsFor(Orientation orientation) {
   return orientation == Orientation.landscape
-      ? (columns: 6, rows: 4)
+      ? (columns: 8, rows: 3)
       : (columns: 4, rows: 6);
 }
+
+/// Whether [grid] is wider than tall — a landscape grid.
+bool isLandscapeGrid(GridDimensions grid) => grid.columns > grid.rows;
 
 /// How far a resize handle's tap target extends beyond its tile's own rect
 /// (handles straddle the tile's edges/corners, half in and half out) — see
@@ -232,7 +243,7 @@ PagePlacementResult placeAcrossPages({
       ],
   };
 
-  final bounds = universalBounds(grid);
+  final size = defaultWidgetSize(grid);
   final pageOrder = [
     if (preferredPage != null && preferredPage >= 0 && preferredPage < maxPages) preferredPage,
     for (var p = 0; p < maxPages; p++)
@@ -251,8 +262,8 @@ PagePlacementResult placeAcrossPages({
       final candidate = firstFit(
         occupied: occupiedByPage[page]!,
         grid: grid,
-        width: kDefaultCreateWidth.clamp(bounds.minWidth, bounds.maxWidth),
-        height: kDefaultCreateHeight.clamp(bounds.minHeight, bounds.maxHeight),
+        width: size.width,
+        height: size.height,
       );
       if (candidate != null) {
         result = candidate;
@@ -273,12 +284,14 @@ PagePlacementResult placeAcrossPages({
 }
 
 /// The size a new widget is created with on [grid] — the same default
-/// [placeAcrossPages] uses — i.e. a widget's "original" size.
+/// [placeAcrossPages] uses — i.e. a widget's "original" size: 2x2 in portrait;
+/// in landscape 2 columns by the grid's full height, so it is not squashed (see
+/// [gridDimensionsFor]).
 ({int width, int height}) defaultWidgetSize(GridDimensions grid) {
   final bounds = universalBounds(grid);
   return (
     width: kDefaultCreateWidth.clamp(bounds.minWidth, bounds.maxWidth),
-    height: kDefaultCreateHeight.clamp(bounds.minHeight, bounds.maxHeight),
+    height: isLandscapeGrid(grid) ? bounds.maxHeight : kDefaultCreateHeight.clamp(bounds.minHeight, bounds.maxHeight),
   );
 }
 

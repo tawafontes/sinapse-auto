@@ -197,4 +197,20 @@ class SensorWidgetConfig extends HiveObject {
   /// `defaultValue`, for any record persisted before this field existed.
   @HiveField(4, defaultValue: 0)
   int page;
+
+  /// The landscape layout (owner request, 2026-11-12): [position], [size] and
+  /// [page] above are the PORTRAIT layout; these three are the same widget's
+  /// own place on the landscape grid, kept apart so that turning the phone
+  /// neither squashes the portrait arrangement into the landscape grid nor
+  /// overwrites it. `null` until the dashboard is first shown in landscape
+  /// (and for every record stored before these fields existed): it then
+  /// derives one from the portrait order — see `LandscapeWidgetLayout`.
+  @HiveField(5)
+  WidgetPosition? landscapePosition;
+
+  @HiveField(6)
+  WidgetSize? landscapeSize;
+
+  @HiveField(7)
+  int? landscapePage;
 }

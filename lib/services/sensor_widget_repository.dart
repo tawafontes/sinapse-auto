@@ -90,8 +90,13 @@ class SensorWidgetRepository {
   /// them from its own in-memory caches (alert colors, reset triggers).
   /// Callers must follow this with [shiftPagesAfterDelete] to keep page
   /// indices contiguous.
-  static Future<List<SensorType>> deleteConfigsOnPage(int deletedPage) async {
-    final onPage = _box.values.where((c) => c.page == deletedPage).toList();
+  ///
+  /// [configs] is the layout the page belongs to — the stored (portrait)
+  /// configs by default, or the dashboard's landscape layouts
+  /// (`LandscapeWidgetLayout`, whose page is the landscape one and whose
+  /// delete deletes the widget) for a page deleted in landscape.
+  static Future<List<SensorType>> deleteConfigsOnPage(int deletedPage, {Iterable<SensorWidgetConfig>? configs}) async {
+    final onPage = (configs ?? _box.values).where((c) => c.page == deletedPage).toList();
     for (final config in onPage) {
       await config.delete();
     }
@@ -103,8 +108,9 @@ class SensorWidgetRepository {
   /// page-manager sheet. [deletedPage] itself must already have no configs
   /// on it — callers deleting a non-empty page call
   /// [deleteConfigsOnPage] first.
-  static Future<void> shiftPagesAfterDelete(int deletedPage) async {
-    for (final config in _box.values) {
+  /// [configs] as in [deleteConfigsOnPage].
+  static Future<void> shiftPagesAfterDelete(int deletedPage, {Iterable<SensorWidgetConfig>? configs}) async {
+    for (final config in (configs ?? _box.values).toList()) {
       if (config.page > deletedPage) {
         config.page -= 1;
         await config.save();

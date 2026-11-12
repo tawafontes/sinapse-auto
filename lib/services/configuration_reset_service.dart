@@ -20,6 +20,7 @@ class ConfigurationResetService {
   Future<void> reset({required DrivingSessionHost sessionHost, required ThemeController themeController}) async {
     sessionHost.ensureConfigurationResetAllowed();
     await AppSettings.setDashboardPageCount(1);
+    await AppSettings.setDashboardLandscapePageCount(1);
     await SensorWidgetRepository.removeSensorsNotIn(const {});
     await themeController.resetToDefaults();
     sessionHost.ensureConfigurationResetAllowed();

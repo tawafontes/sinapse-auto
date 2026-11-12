@@ -13,6 +13,7 @@ class AppSettings {
   AppSettings._();
 
   static const _dashboardPageCountKey = 'dashboardPageCount';
+  static const _dashboardLandscapePageCountKey = 'dashboardLandscapePageCount';
   static const _dashboardLastViewedPageKey = 'dashboardLastViewedPage';
   static const _hudMirroredKey = 'hudMirrored';
 
@@ -28,6 +29,14 @@ class AppSettings {
 
   static Future<void> setDashboardPageCount(int count) {
     return _box.put(_dashboardPageCountKey, count);
+  }
+
+  /// The same as [dashboardPageCount] for the landscape dashboard, which has a
+  /// layout — and so pages — of its own (see `LandscapeWidgetLayout`).
+  static int get dashboardLandscapePageCount => (_box.get(_dashboardLandscapePageCountKey) as int?) ?? 1;
+
+  static Future<void> setDashboardLandscapePageCount(int count) {
+    return _box.put(_dashboardLandscapePageCountKey, count);
   }
 
   /// Which dashboard page was on screen when the app was last closed —
