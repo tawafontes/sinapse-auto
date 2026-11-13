@@ -39,6 +39,26 @@ class ObdPhase0Runner {
   final report = Phase0Report();
   final _clock = Stopwatch()..start();
 
+  /// The bridge codes that mean the link itself is gone, not just one bad
+  /// answer. Once one arrives the runner stops sending until [connect] works
+  /// again: otherwise each send fails instantly and the 5-minute live loop
+  /// fills the transcript with thousands of identical error lines — exactly
+  /// in the "link dropped mid-trip" case phase 0 wants to record cleanly.
+  static const _linkLostCodes = {'not_connected', 'closed', 'io', 'disabled'};
+
+  /// True after a link-lost error, until the next successful [connect].
+  bool linkLost = false;
+
+  /// Logs a bridge error; returns whether it means the link is gone.
+  bool _bridgeError(ObdBridgeException e) {
+    write('${_stamp()} ! erro ${e.code}: ${e.message}');
+    if (!linkLost && _linkLostCodes.contains(e.code)) {
+      linkLost = true;
+      note('conexão perdida: nada mais é enviado até conectar de novo');
+    }
+    return linkLost;
+  }
+
   String _stamp() => '[${(_clock.elapsedMilliseconds / 1000).toStringAsFixed(3).padLeft(8)}]';
 
   void note(String text) => write('${_stamp()} # $text');
@@ -46,6 +66,7 @@ class ObdPhase0Runner {
   /// Sends [command] and logs it; returns the raw answer ('' on a bridge
   /// error, which is logged too).
   Future<String> _send(String command, {Duration timeout = const Duration(seconds: 2), String Function(String raw)? decode}) async {
+    if (linkLost) return '';
     write('${_stamp()} > $command');
     try {
       final reply = await bridge.send(command, timeout: timeout);
@@ -55,7 +76,7 @@ class ObdPhase0Runner {
           '${decoded == null || decoded.isEmpty ? '' : '  => $decoded'}');
       return reply.response;
     } on ObdBridgeException catch (e) {
-      write('${_stamp()} ! erro ${e.code}: ${e.message}');
+      _bridgeError(e);
       return '';
     }
   }
@@ -64,6 +85,7 @@ class ObdPhase0Runner {
     note('conectando a ${device.name} (${device.address})');
     try {
       final c = await bridge.connect(device.address);
+      linkLost = false;
       report.connectMethod = c.method;
       note('conectado pelo método ${c.method} em ${c.millis} ms');
       return c;
@@ -129,14 +151,14 @@ class ObdPhase0Runner {
     final probe = report.supported.contains(0x0C) ? '010C' : '0100';
     note('tempo de resposta: 20 x $probe');
     final times = <int>[];
-    for (var i = 0; i < 20; i++) {
+    for (var i = 0; i < 20 && !linkLost; i++) {
       write('${_stamp()} > $probe');
       try {
         final r = await bridge.send(probe);
         times.add(r.millis);
         write('${_stamp()} < ${responseLines(r.response).join(' | ')} (${r.millis} ms${r.timedOut ? ', SEM PROMPT' : ''})');
       } on ObdBridgeException catch (e) {
-        write('${_stamp()} ! erro ${e.code}: ${e.message}');
+        _bridgeError(e);
       }
     }
     if (times.isNotEmpty) {
@@ -178,10 +200,10 @@ class ObdPhase0Runner {
     final started = DateTime.now();
     var answers = 0;
     var cycle = 0;
-    while (!cancelled() && DateTime.now().difference(started) < duration) {
+    while (!cancelled() && !linkLost && DateTime.now().difference(started) < duration) {
       final pids = [...fast, if (cycle % 10 == 0) ...slow];
       for (final pid in pids) {
-        if (cancelled()) break;
+        if (cancelled() || linkLost) break;
         final raw = await _send('01${_hex(pid)}', decode: (r) => describeMode01(r, pid) ?? '');
         final value = describeMode01(raw, pid);
         if (value != null) {

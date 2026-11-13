@@ -133,7 +133,25 @@ class ObdBridge(private val context: Context, messenger: BinaryMessenger) {
         throw ObdError("connect_failed", failures.joinToString(" | "))
     }
 
+    /**
+     * A broken link (adapter unplugged, out of range, the car cut its power) shows
+     * up as an IOException or end of stream. The socket is closed right there, so
+     * the next call answers `not_connected` instead of failing on a dead socket
+     * again — without this, a loop of sends spins through instant errors.
+     */
     private fun send(command: String, timeoutMs: Long): Map<String, Any> {
+        try {
+            return exchange(command, timeoutMs)
+        } catch (error: IOException) {
+            disconnect()
+            throw ObdError("closed", "link lost: ${error.javaClass.simpleName}: ${error.message}")
+        } catch (error: ObdError) {
+            if (error.code == "closed") disconnect()
+            throw error
+        }
+    }
+
+    private fun exchange(command: String, timeoutMs: Long): Map<String, Any> {
         val input = input ?: throw ObdError("not_connected", "not connected")
         val output = output ?: throw ObdError("not_connected", "not connected")
         // Whatever arrived late from a previous command does not belong to this one.

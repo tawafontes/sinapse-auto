@@ -148,12 +148,44 @@ void main() {
       expect(car.sent, contains('0105'));
     });
 
-    test('a bridge error is logged and the sequence goes on', () async {
+    test('without a link the sequence logs the error once and sends nothing more', () async {
       final car = FakeCar(); // never connected: every send fails
       final lines = <String>[];
-      final r = await ObdPhase0Runner(car, write: lines.add).runSequence();
-      expect(lines.where((l) => l.contains('! erro not_connected')), isNotEmpty);
+      final runner = ObdPhase0Runner(car, write: lines.add);
+      final r = await runner.runSequence();
+      expect(lines.where((l) => l.contains('! erro not_connected')), hasLength(1));
+      expect(car.sent, ['ATZ']);
+      expect(runner.linkLost, isTrue);
       expect(r.supported, isEmpty);
+    });
+
+    test('a link dropped mid-trip ends the live loop at once, and a reconnect resumes', () async {
+      final car = FakeCar();
+      final lines = <String>[];
+      final runner = ObdPhase0Runner(car, write: lines.add);
+      const device = (name: 'V-LINK', address: 'AA:BB:CC:DD:EE:FF');
+      await runner.connect(device);
+      runner.report.supported.addAll([0x0C, 0x0D, 0x05]);
+      var cycles = 0;
+      final watch = Stopwatch()..start();
+      await runner.runLive(
+        duration: const Duration(minutes: 5),
+        cancelled: () {
+          // The adapter goes away after a few reads, as when it is unplugged.
+          if (++cycles == 5) car.connected = false;
+          return false;
+        },
+      );
+      expect(watch.elapsed, lessThan(const Duration(seconds: 5)), reason: 'no spinning until the 5 minutes end');
+      expect(lines.where((l) => l.contains('! erro')), hasLength(1));
+      expect(lines.where((l) => l.contains('conexão perdida')), hasLength(1));
+      expect(lines.last, contains('leitura contínua encerrada'));
+
+      final sentBefore = car.sent.length;
+      await runner.connect(device);
+      expect(runner.linkLost, isFalse);
+      await runner.probeCar();
+      expect(car.sent.sublist(sentBefore), ['ATRV', '0100']);
     });
   });
 
@@ -192,5 +224,15 @@ void main() {
     expect(text, contains('conectado pelo método secure em 812 ms'));
     expect(text, contains('# resumo: versão ELM327 v2.3'));
     expect(text, contains('VIN 1G4JC5444R7252367'));
+
+    // The adapter goes away: the next action finds out, and "Conectar" is back.
+    car.connected = false;
+    await tester.runAsync(() async {
+      await tester.tap(find.byKey(const ValueKey('obd0_probe')));
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+    });
+    await tester.pump();
+    expect(find.byKey(const ValueKey('obd0_connect')), findsOneWidget);
+    expect(find.byKey(const ValueKey('obd0_disconnect')), findsNothing);
   });
 }

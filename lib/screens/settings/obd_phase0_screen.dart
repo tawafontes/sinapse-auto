@@ -103,7 +103,13 @@ class _ObdPhase0ScreenState extends State<ObdPhase0Screen> {
     try {
       await work();
     } finally {
-      if (mounted) setState(() => _busy = false);
+      // A lost link puts the "Conectar" button back, to reconnect and go on.
+      if (mounted) {
+        setState(() {
+          _busy = false;
+          if (_runner.linkLost) _connected = false;
+        });
+      }
     }
   }
 
