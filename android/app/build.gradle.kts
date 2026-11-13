@@ -63,6 +63,16 @@ repositories {
     }
 }
 
+// Dashcam dual camera phase 0 (DualCameraProbe.kt): the app's own Kotlin compiles against
+// CameraX's concurrent camera API. The same modules, at the same 1.6.2, the camera plugin
+// already brings in (and camera-video still resolves to F2, by the substitution below) — they
+// are declared only to be on the app's compile classpath, not added to the build.
+dependencies {
+    implementation("androidx.camera:camera-core:1.6.2")
+    implementation("androidx.camera:camera-lifecycle:1.6.2")
+    implementation("androidx.camera:camera-video:1.6.2")
+}
+
 configurations.configureEach {
     resolutionStrategy.dependencySubstitution {
         substitute(module("androidx.camera:camera-video:1.6.2"))

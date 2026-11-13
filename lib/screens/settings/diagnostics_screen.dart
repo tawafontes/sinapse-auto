@@ -8,6 +8,7 @@ import '../../services/altitude_trend.dart';
 import '../../services/dashboard_sensor_streams.dart';
 import '../../services/gnss_quality.dart';
 import '../../services/unit_preferences.dart';
+import 'dual_camera_probe_screen.dart';
 import 'obd_phase0_screen.dart';
 
 /// Portuguese label for how much a GNSS-derived reading (speed, heading)
@@ -291,6 +292,16 @@ class _DiagnosticsScreenState extends State<DiagnosticsScreen> {
               subtitle: const Text('Fase 0: lê o carro e grava a transcrição'),
               trailing: const Icon(Icons.chevron_right),
               onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const ObdPhase0Screen())),
+            ),
+            // Dashcam dual camera phase 0 (2026-11-13): likewise a test tool,
+            // until the dashcam records both cameras itself.
+            ListTile(
+              key: const ValueKey('diagnostics_dualCameraProbe'),
+              leading: const Icon(Icons.switch_camera_outlined),
+              title: const Text('Teste de câmeras simultâneas'),
+              subtitle: const Text('Fase 0: traseira e frontal compostas num só vídeo'),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => DualCameraProbeScreen())),
             ),
           ],
         ),

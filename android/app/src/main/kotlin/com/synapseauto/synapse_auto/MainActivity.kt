@@ -38,6 +38,7 @@ class MainActivity : FlutterActivity() {
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         obdBridge = ObdBridge(applicationContext, flutterEngine.dartExecutor.binaryMessenger)
+        dualCameraProbe = DualCameraProbe(this, flutterEngine.dartExecutor.binaryMessenger, flutterEngine.renderer)
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, STORAGE_CHANNEL).setMethodCallHandler { call, result ->
             when (call.method) {
                 "volumeStats" -> {
@@ -241,11 +242,16 @@ class MainActivity : FlutterActivity() {
         galleryExecutor.shutdown()
         obdBridge?.dispose()
         obdBridge = null
+        dualCameraProbe?.release()
+        dualCameraProbe = null
         super.onDestroy()
     }
 
     /** OBD-II phase 0 link (see [ObdBridge]). */
     private var obdBridge: ObdBridge? = null
+
+    /** Dashcam dual camera phase 0 (see [DualCameraProbe]). */
+    private var dualCameraProbe: DualCameraProbe? = null
 
     private val galleryExecutor: ExecutorService = Executors.newSingleThreadExecutor()
     private val mainHandler = Handler(Looper.getMainLooper())
