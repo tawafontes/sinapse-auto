@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show DeviceOrientation;
 
 import '../../models/dashcam_status.dart';
 import '../../screens/sessions/dashcam_recordings_screen.dart';
@@ -10,7 +11,7 @@ import '../../services/dashcam_session_controller.dart';
 import '../../services/driving_session_recorder.dart' show DrivingSessionRecorderState, SessionAdmissionRejected;
 
 /// The Dashcam fullscreen `content` (pushed via the same `SensorFullscreenScreen`
-/// every other instrument uses, Fase 15) — a live [CameraPreview] with a
+/// every other instrument uses, Fase 15) — a live [DashcamCameraSurface] with a
 /// slim status bar while recording, or a state-appropriate empty view
 /// (disabled/idle/error) otherwise, mirroring `SessionRecordingScreen`'s own
 /// empty-state convention.
@@ -63,13 +64,97 @@ class _DashcamPreviewViewState extends State<DashcamPreviewView> {
       return Stack(
         fit: StackFit.expand,
         children: [
-          CameraPreview(previewController),
-          Positioned(left: 0, right: 0, bottom: 0, child: _StatusBar(controller: controller, formatElapsed: _formatElapsed, formatMb: _formatMb)),
+          // The image's black bars may run under a cutout; the bar may not.
+          ColoredBox(color: Colors.black, child: DashcamCameraSurface(controller: previewController)),
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: 0,
+            child: SafeArea(top: false, child: _StatusBar(controller: controller, formatElapsed: _formatElapsed, formatMb: _formatMb)),
+          ),
         ],
       );
     }
 
     return _EmptyState(controller: controller);
+  }
+}
+
+/// The live camera image, whole and undistorted: the frame the camera records,
+/// fitted inside the available space (black bars on the spare sides), never
+/// stretched or cropped.
+///
+/// Replaces the `camera` package's `CameraPreview`, which distorted the image
+/// on the device (2026-11-13, SM-S918B): it sizes itself with an
+/// [AspectRatio] that a tight parent (this view's `StackFit.expand`) overrides,
+/// and while a video records it orients by `recordingOrientation`, the
+/// orientation at that segment's START, whereas `camera_android_camerax`'s own
+/// rotation correction inside `buildPreview()` follows the live device
+/// orientation. Turning the phone mid-recording left the two out of step.
+/// Here both the box and the turn follow the live `deviceOrientation`, the same
+/// stream the plugin's correction reads — exactly what `CameraPreview` does
+/// when nothing records.
+class DashcamCameraSurface extends StatefulWidget {
+  const DashcamCameraSurface({super.key, required this.controller});
+
+  final CameraController controller;
+
+  @override
+  State<DashcamCameraSurface> createState() => _DashcamCameraSurfaceState();
+}
+
+class _DashcamCameraSurfaceState extends State<DashcamCameraSurface> {
+  static const _quarterTurns = {
+    DeviceOrientation.portraitUp: 0,
+    DeviceOrientation.landscapeRight: 1,
+    DeviceOrientation.portraitDown: 2,
+    DeviceOrientation.landscapeLeft: 3,
+  };
+
+  /// The last geometry logged, so the log gets one line per change rather than
+  /// one per frame — the evidence read over USB (`adb logcat -s flutter`).
+  String? _loggedGeometry;
+
+  void _logGeometry(String geometry) {
+    if (geometry == _loggedGeometry) return;
+    _loggedGeometry = geometry;
+    debugPrint('dashcam preview: $geometry');
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<CameraValue>(
+      valueListenable: widget.controller,
+      builder: (context, value, _) {
+        final orientation = value.deviceOrientation;
+        final landscape = orientation == DeviceOrientation.landscapeLeft || orientation == DeviceOrientation.landscapeRight;
+        // previewSize is the sensor's landscape size: the frame is portrait
+        // when the device is.
+        final aspectRatio = landscape ? value.aspectRatio : 1 / value.aspectRatio;
+        return LayoutBuilder(
+          builder: (context, constraints) {
+            final size = value.previewSize;
+            final box = constraints.biggest;
+            final width = box.width / box.height > aspectRatio ? box.height * aspectRatio : box.width;
+            if (box.isFinite) {
+              _logGeometry(
+              'orientation=${orientation.name} '
+              'camera=${size == null ? '?' : '${size.width.round()}x${size.height.round()}'} '
+              'frame=${aspectRatio.toStringAsFixed(3)} '
+              'area=${box.width.round()}x${box.height.round()} '
+                'shown=${width.round()}x${(width / aspectRatio).round()}',
+              );
+            }
+            return Center(
+              child: AspectRatio(
+                aspectRatio: aspectRatio,
+                child: RotatedBox(quarterTurns: _quarterTurns[orientation]!, child: widget.controller.buildPreview()),
+              ),
+            );
+          },
+        );
+      },
+    );
   }
 }
 
@@ -279,37 +364,43 @@ class _EmptyState extends StatelessWidget {
         );
     }
 
-    return Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 64, color: colorScheme.onSurfaceVariant),
-          const SizedBox(height: 16),
-          Text(message, textAlign: TextAlign.center, style: TextStyle(color: colorScheme.onSurfaceVariant)),
-          const SizedBox(height: 24),
-          action,
-          // The session may be recording while the camera is still starting,
-          // briefly unavailable or in error: stopping must not depend on it.
-          // Not while the camera is idle/disabled/finalizing: nothing is being
-          // recorded by it then, and that view already offers its own start for
-          // the session (a recorder-only session, e.g. the dashcam enabled
-          // mid-session) — a stop next to "Nenhuma sessão em andamento" would
-          // read as a contradiction. The session screen still stops it.
-          if (_cameraEngaged(status) && _canStopFromPreview(controller)) ...[
-            const SizedBox(height: 16),
-            _StopButton(controller: controller),
-          ],
-          // A shortcut to the recordings whenever the camera is not in use —
-          // never next to a live recording's own controls.
-          if (!_cameraEngaged(status)) ...[
-            const SizedBox(height: 16),
-            TextButton.icon(
-              onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const DashcamRecordingsScreen())),
-              icon: const Icon(Icons.video_library_outlined),
-              label: const Text('Ver gravações'),
-            ),
-          ],
-        ],
+    // Its own ground: the fullscreen hands this view the whole screen, unpainted.
+    return ColoredBox(
+      color: colorScheme.surface,
+      child: SafeArea(
+        child: Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: 64, color: colorScheme.onSurfaceVariant),
+              const SizedBox(height: 16),
+              Text(message, textAlign: TextAlign.center, style: TextStyle(color: colorScheme.onSurfaceVariant)),
+              const SizedBox(height: 24),
+              action,
+              // The session may be recording while the camera is still starting,
+              // briefly unavailable or in error: stopping must not depend on it.
+              // Not while the camera is idle/disabled/finalizing: nothing is being
+              // recorded by it then, and that view already offers its own start for
+              // the session (a recorder-only session, e.g. the dashcam enabled
+              // mid-session) — a stop next to "Nenhuma sessão em andamento" would
+              // read as a contradiction. The session screen still stops it.
+              if (_cameraEngaged(status) && _canStopFromPreview(controller)) ...[
+                const SizedBox(height: 16),
+                _StopButton(controller: controller),
+              ],
+              // A shortcut to the recordings whenever the camera is not in use —
+              // never next to a live recording's own controls.
+              if (!_cameraEngaged(status)) ...[
+                const SizedBox(height: 16),
+                TextButton.icon(
+                  onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const DashcamRecordingsScreen())),
+                  icon: const Icon(Icons.video_library_outlined),
+                  label: const Text('Ver gravações'),
+                ),
+              ],
+            ],
+          ),
+        ),
       ),
     );
   }

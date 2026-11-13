@@ -19,6 +19,7 @@ void main() {
     VoidCallback? onChangeStyle,
     VoidCallback? onResetRecords,
     Future<bool> Function(BuildContext context)? confirmExit,
+    bool fullBleed = false,
   }) async {
     await tester.pumpWidget(
       MaterialApp(
@@ -37,6 +38,7 @@ void main() {
                         onChangeStyle: onChangeStyle,
                         onResetRecords: onResetRecords,
                         confirmExit: confirmExit,
+                        fullBleed: fullBleed,
                       ),
                     ),
                   ),
@@ -58,6 +60,26 @@ void main() {
     expect(find.text('conteúdo do sensor'), findsOneWidget);
     final topBarOpacity = tester.widget<AnimatedOpacity>(find.byType(AnimatedOpacity));
     expect(topBarOpacity.opacity, 0);
+  });
+
+  Finder contentMargin() => find.ancestor(
+    of: find.text('conteúdo do sensor'),
+    matching: find.byWidgetPredicate((w) => w is Padding && w.padding == const EdgeInsets.all(16)),
+  );
+  Finder contentSafeArea() => find.ancestor(of: find.text('conteúdo do sensor'), matching: find.byType(SafeArea));
+
+  testWidgets('an instrument sits inside a margin, clear of a cutout', (tester) async {
+    await pumpFullscreen(tester);
+
+    expect(contentMargin(), findsOneWidget);
+    expect(contentSafeArea(), findsOneWidget);
+  });
+
+  testWidgets('fullBleed (the dashcam\'s camera): the whole screen, no margin and no SafeArea — the content paints its own ground', (tester) async {
+    await pumpFullscreen(tester, fullBleed: true);
+
+    expect(contentMargin(), findsNothing);
+    expect(contentSafeArea(), findsNothing);
   });
 
   testWidgets('a tap reveals the controls (label becomes visible)', (tester) async {

@@ -46,7 +46,16 @@ class SensorFullscreenScreen extends StatefulWidget {
     this.resetRecordsLabel = 'Resetar registros',
     this.resetRecordsIcon = Icons.restart_alt,
     this.confirmExit,
+    this.fullBleed = false,
   });
+
+  /// Content that is an image rather than an instrument (the dashcam's
+  /// camera, 2026-11-13): it gets the whole screen — no margin, no SafeArea —
+  /// and paints its own ground, keeping its own text and controls clear of a
+  /// cutout. The theme's surface around it showed as a light frame around the
+  /// camera's black bars, and a fixed black ground hid the dashcam's
+  /// idle-state text, drawn for the theme's surface.
+  final bool fullBleed;
 
   /// Asked on a double-tap before returning to the dashboard — `true` leaves.
   /// `null` leaves right away. The dashcam uses it to offer ending a recording
@@ -207,9 +216,11 @@ class _SensorFullscreenScreenState extends State<SensorFullscreenScreen> {
               onTap: _handleTap,
               onDoubleTap: _handleDoubleTap,
               onLongPress: _showQuickActions,
-              child: SafeArea(
-                child: Padding(padding: const EdgeInsets.all(16), child: widget.content),
-              ),
+              child: widget.fullBleed
+                  ? widget.content
+                  : SafeArea(
+                      child: Padding(padding: const EdgeInsets.all(16), child: widget.content),
+                    ),
             ),
           ),
           Positioned(

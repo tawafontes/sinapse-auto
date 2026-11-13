@@ -10,7 +10,6 @@
 import 'dart:async';
 import 'dart:io';
 
-import 'package:camera/camera.dart' show CameraPreview;
 import 'package:camera_android_camerax/camera_android_camerax.dart';
 // ignore: implementation_imports
 import 'package:camera_android_camerax/src/camerax_library.dart';
@@ -1015,7 +1014,7 @@ void main() {
     try {
       await tester.pump();
       expect([indicatorRed(), previewRed(), sessionRed()], [false, false, false]);
-      expect(find.byType(CameraPreview), findsOneWidget);
+      expect(find.byType(DashcamCameraSurface), findsOneWidget);
 
       final a = native.last;
       final pending = [a.message('videoProgress'), a.message('recordingEnded', 3)];
@@ -1024,7 +1023,7 @@ void main() {
       });
       await tester.pump();
       expect([indicatorRed(), previewRed(), sessionRed()], [true, true, true], reason: 'A confirmed by its own progress');
-      final surface = tester.element(find.byType(CameraPreview));
+      final surface = tester.element(find.byType(DashcamCameraSurface));
 
       await tester.runAsync(() async {
         ticks.last();
@@ -1048,7 +1047,7 @@ void main() {
       });
       await tester.pump();
       expect([indicatorRed(), previewRed(), sessionRed()], [true, true, true], reason: 'B confirmed by its own progress');
-      expect(identical(tester.element(find.byType(CameraPreview)), surface), isTrue, reason: 'never remounted');
+      expect(identical(tester.element(find.byType(DashcamCameraSurface)), surface), isTrue, reason: 'never remounted');
     } finally {
       await tester.pumpWidget(const SizedBox.shrink());
       await tester.runAsync(() async {

@@ -8,7 +8,6 @@
 import 'dart:async';
 import 'dart:io';
 
-import 'package:camera/camera.dart' show CameraPreview;
 import 'package:camera_platform_interface/camera_platform_interface.dart' show CameraPlatform;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -194,7 +193,7 @@ void main() {
       rig.platform.emitVideoProgress();
       await tester.pump();
       _expectRed(tester, 'with video confirmed');
-      final previewElement = tester.element(find.byType(CameraPreview));
+      final previewElement = tester.element(find.byType(DashcamCameraSurface));
       final surfaceElement = tester.element(find.byKey(const Key('surface')));
       final callsAtFirstFrame = rig.platform.calls.length;
 
@@ -232,7 +231,7 @@ void main() {
       await tester.pump();
       _expectRed(tester, 'with the new segment confirmed');
 
-      expect(identical(tester.element(find.byType(CameraPreview)), previewElement), isTrue, reason: 'the same preview, never remounted');
+      expect(identical(tester.element(find.byType(DashcamCameraSurface)), previewElement), isTrue, reason: 'the same preview, never remounted');
       expect(identical(tester.element(find.byKey(const Key('surface'))), surfaceElement), isTrue);
       expect(rig.platform.calls.skip(callsAtFirstFrame).where((c) => c != 'stopVideoRecording' && c != 'startVideoCapturing' && c != 'prepareForVideoRecording'), isEmpty, reason: 'nothing but the rotation\'s own calls');
     } finally {
