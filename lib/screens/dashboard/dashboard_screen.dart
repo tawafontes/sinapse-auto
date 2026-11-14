@@ -1451,6 +1451,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
       onDragPositionUpdate: _handleDragGlobalPosition,
       onResized: (rect) => _handleResized(config, rect),
       alertColor: _tileAlertColor(config.sensorType),
+      // The OBD-II cards' red border (last value, link down) is steady.
+      alertSteady: obdSensorTypes.contains(config.sensorType),
       isEditing: _editingConfig == config,
       // While any tile is being edited, a tap anywhere — this same tile, a
       // different one, or empty space (see _buildPageGrid's background

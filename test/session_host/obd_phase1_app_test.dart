@@ -72,6 +72,20 @@ void main() {
         await app.driveUntil(() => obd.state == ObdLinkState.reconnecting, label: 'link lost');
         await app.driveUntil(() => tile(SensorType.engineCoolant).alertColor != null, label: 'red border');
         expect(tileShows(SensorType.engineCoolant, '81'), isTrue, reason: 'the last value stays');
+        // A steady red border (owner decision, 2026-11-14), not a blink: the
+        // same red across more than one blink interval.
+        Color border() {
+          final body = find.descendant(
+            of: find.byWidgetPredicate((w) => w is DashboardTile && w.label == sensorTypeMetadata[SensorType.engineCoolant]!.label),
+            matching: find.byKey(const ValueKey('dashboardTileVisualBody')),
+          );
+          return ((tester.widget<Container>(body).decoration! as BoxDecoration).border! as Border).top.color;
+        }
+        final red = tile(SensorType.engineCoolant).alertColor!;
+        for (var i = 0; i < 4; i++) {
+          expect(border(), red, reason: 'steady, check $i');
+          await tester.pump(const Duration(milliseconds: 300));
+        }
         final stale = await app.driveFuture(app.host.streams.snapshot.first);
         expect(stale.engineRpm, isNull, reason: 'the snapshot carries live values only');
         car.plugIn();

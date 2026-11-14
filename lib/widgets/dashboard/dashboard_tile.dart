@@ -115,6 +115,7 @@ class DashboardTile extends StatefulWidget {
     this.onDoubleTap,
     this.onLongHold,
     this.alertColor,
+    this.alertSteady = false,
   });
 
   /// How long the finger must stay down and still for [onLongHold].
@@ -131,6 +132,12 @@ class DashboardTile extends StatefulWidget {
   final ValueChanged<CellRect> onMoved;
   final ValueChanged<CellRect> onResized;
   final Color? alertColor;
+
+  /// Whether [alertColor] is shown as a steady border instead of blinking —
+  /// the OBD-II cards' "last value, link down" state (owner decision,
+  /// 2026-11-14: a fixed red border), which is a condition that lasts, not an
+  /// event to call attention to.
+  final bool alertSteady;
 
   /// Whether this specific tile is the one currently in edit mode — at most
   /// one tile dashboard-wide at a time (owned by the parent).
@@ -303,7 +310,7 @@ class _DashboardTileState extends State<DashboardTile> with SingleTickerProvider
   @override
   void didUpdateWidget(covariant DashboardTile oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if ((oldWidget.alertColor != null) != (widget.alertColor != null)) {
+    if ((oldWidget.alertColor != null) != (widget.alertColor != null) || oldWidget.alertSteady != widget.alertSteady) {
       _syncAlertBlinkTimer();
     }
     // Edit mode can end (parent taps empty space) via a *second* pointer
@@ -368,7 +375,8 @@ class _DashboardTileState extends State<DashboardTile> with SingleTickerProvider
   }
 
   void _syncAlertBlinkTimer() {
-    final alerting = widget.alertColor != null;
+    // A steady alert needs no timer: _alertBlinkOn stays true.
+    final alerting = widget.alertColor != null && !widget.alertSteady;
     if (alerting && _alertBlinkTimer == null) {
       _alertBlinkOn = true;
       _alertBlinkTimer = Timer.periodic(_alertBlinkInterval, (_) {
