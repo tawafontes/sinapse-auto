@@ -192,6 +192,13 @@ class ObdPhase0Runner {
     await _send(probe, timeout: const Duration(seconds: 3));
     await _send('ATSH7E0');
     await _send(probe, timeout: const Duration(seconds: 3));
+    // Phase 1's polling, engine only: the bitmap as the engine alone sees it,
+    // then the fast and slow groups as single multi-PID requests. A fixed list
+    // on purpose — the map decoded above may have come from the other ECU (it
+    // did on the Nivus' first run); a PID the engine lacks is just left out.
+    await _send('0100', timeout: const Duration(seconds: 3), decode: _describeBitmap(0x00));
+    await _send('010C040D11', timeout: const Duration(seconds: 3));
+    await _send('010542', timeout: const Duration(seconds: 3));
     await _send('ATSH7DF');
     await _send('ATH0');
   }
