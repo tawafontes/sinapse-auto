@@ -20,6 +20,8 @@ class FakeCar implements ObdBridge {
     'ATRV': '12.6V\r\r',
     'ATDP': 'AUTO, ISO 15765-4 (CAN 11/500)\r\r',
     'ATDPN': 'A6\r\r',
+    'ATSH7E0': 'OK\r\r',
+    'ATSH7DF': 'OK\r\r',
     // 01 03 04 05 06 07 0C 0D 0E 0F 10 11 13 15 1C 1F 20
     '0100': 'SEARCHING...\r41 00 BE 3F A8 13\r\r',
     // 21 2F 31 33 40
@@ -114,6 +116,9 @@ void main() {
       expect(car.sent, isNot(contains('0160')), reason: '0x60 is not in the 0140 bitmap');
       expect(car.sent.where((c) => c.startsWith('04')), isEmpty, reason: 'never clears codes');
       expect(car.sent.every((c) => c.startsWith('AT') || RegExp(r'^(01|03|07|09|0A)').hasMatch(c)), isTrue);
+      // The headers step runs last and leaves the adapter as the live run expects it.
+      expect(car.sent, containsAllInOrder(['ATH1', '0100', '010C', 'ATSH7E0', '010C', 'ATSH7DF', 'ATH0']));
+      expect(car.sent.last, 'ATH0');
 
       expect(r.connectMethod, 'secure');
       expect(r.adapterVersion, 'ELM327 v2.3');

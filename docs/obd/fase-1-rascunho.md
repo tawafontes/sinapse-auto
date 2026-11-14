@@ -32,7 +32,7 @@ DashboardSensorStreams.snapshot  (TelemetrySnapshot ganha campos opcionais de ve
 | `connecting` | abriu o app / voltou ao app / tocou em Conectar | cinza piscando | "Conectando…" |
 | `waitingForCar` | o ELM respondeu (`ATZ`/`ATRV`), mas `0100` dá `NO DATA`/`UNABLE TO CONNECT` | âmbar | "Ligue o carro" |
 | `receiving` | `0100` respondeu e o polling está rodando | verde | valor ao vivo ou "Seu carro não informa este dado" |
-| `reconnecting(n)` | o socket caiu (`closed`) ou houve N timeouts seguidos | vermelho / piscando | último valor esmaecido + "Reconectando…" |
+| `reconnecting(n)` | o socket caiu (`closed`) ou houve N timeouts seguidos | vermelho / piscando | **último valor com a borda em vermelho** (decisão do dono, seção 11) |
 
 - **Backoff:** 5 s → 15 s → 30 s → 60 s (fica em 60 s). Zera ao chegar em `receiving`.
 - **Em `waitingForCar`:** repetir `0100` a cada X s, sem derrubar o socket. **[Haval]** Ainda não se sabe se o adaptador mantém o link com a ignição desligada nem quanto tempo leva para acordar; isso define o X e decide se `waitingForCar` mantém o socket aberto ou se reconecta.
@@ -54,11 +54,11 @@ Plano inicial (o Nivus mostrou ~65 ms por pedido, com 1 ou 6 PIDs):
 
 | Grupo | PIDs | Pedido | Período |
 |---|---|---|---|
-| Rápido | `0C` rotação, `04` carga (+ `0D`, `11` se suportados) | **um** multi-PID (`010C04…`) | ~250 ms (4 Hz) |
+| Rápido | `0C` rotação, `04` carga (+ `0D`, `11` se suportados) | **um** multi-PID (`010C04…`) | ~500 ms (2 Hz, decisão do dono) |
 | Lento | `05` temperatura, `42` tensão do módulo | um multi-PID | 5 s |
 | Muito lento | `ATRV` | comando AT | 10 s |
 
-- O snapshot já é limitado a ~5 Hz na cadência do GPS (`snapshotGpsCadenceGap`), então 4 Hz no rápido basta e deixa folga no adaptador e na bateria.
+- O snapshot já é limitado a ~5 Hz na cadência do GPS (`snapshotGpsCadenceGap`), então 2 Hz no rápido fica bem abaixo desse limite e deixa folga no adaptador e na bateria.
 - **Multi-PID** só com PIDs que o mapa marca como suportados, no máximo 6 por pedido. Se o carro recusar o multi-PID, a resposta não traz todos os PIDs pedidos; nesse caso, cair para um PID por pedido e salvar essa limitação.
 - **Fila:** os comandos são serializados no Dart (um pedido em voo por vez), e os pedidos do usuário (tela de diagnóstico) passam na frente do polling.
 - **Timeout por pedido:** 500 ms; o p99 no Nivus foi 171 ms. Três timeouts seguidos → `reconnecting`.
@@ -89,7 +89,7 @@ Proposta: começar pela (a), com a (b) como diagnóstico. **[Haval]** Para decid
   - `vehicleVoltage` (double?, do `ATRV`, ou do `0142` como reserva);
   - `obdLinkState` (enum, para os widgets mostrarem o estado sem consultar o serviço).
 - Os dados OBD entram pelo caminho **limitado** (`emitThrottled`), como o GPS.
-- **Validade:** cada valor guarda o horário em que foi lido. Se passar de 3 s sem atualização, vai para `null`, para nenhum widget mostrar um valor velho como se fosse ao vivo.
+- **Validade:** cada valor guarda o horário em que foi lido. Se passar de ~3 s sem atualização (ou o link cair), o valor **continua** no snapshot, marcado como velho, e o widget o mostra com a borda em vermelho (decisão do dono, seção 11). Nenhum widget mostra um valor velho como se fosse ao vivo.
 - **Vida do link independente do snapshot:** o `ObdService` conecta ao abrir o app, mesmo sem ninguém ouvindo o snapshot. O polling só roda com alguém ouvindo ou com uma sessão gravando. Ponto para o Codex: confirmar que isso não cria um segundo pipeline (o serviço só produz leituras, e quem monta o snapshot continua sendo o `DashboardSensorStreams`).
 
 ## 7. Interface
@@ -138,9 +138,9 @@ Proposta: começar pela (a), com a (b) como diagnóstico. **[Haval]** Para decid
 6. Início automático de sessão.
 7. Revisão do Codex → ajustes → validação no carro → commit.
 
-## 11. Decisões em aberto para o dono
+## 11. Decisões do dono (13/11/2026)
 
-1. **P1:** endereçar só o motor (`ATSH7E0`) ou filtrar pelo cabeçalho? E acrescentar o passo `ATH1` à ferramenta da fase 0 antes da rodada no Haval?
-2. A tela da fase 0 passa a usar o link do `ObdService` (modo exclusivo) ou é aposentada quando a fase 1 entrar?
-3. Polling rápido a 4 Hz está bom, ou prefere economizar mais (2 Hz)?
-4. Mostrar o último valor esmaecido durante `reconnecting`, ou só o estado?
+1. **P1 aprovado:** endereçar só o motor (`ATSH7E0`), com `ATH1` como diagnóstico. O passo de cabeçalhos (`ATH1` → `0100`/`010C` → `ATSH7E0` → `010C` → `ATSH7DF` → `ATH0`) já foi acrescentado ao fim da sequência da fase 0, para as próximas rodadas (Nivus e Haval).
+2. **A tela da fase 0 será eliminada** quando os elementos da fase 1 estiverem funcionando e validados no carro. Até lá ela continua como está, e não precisa ganhar o "modo exclusivo" da seção 1. A tela do adaptador da fase 1 assume o diagnóstico.
+3. **Polling rápido a 2 Hz** (rotação e carga a cada ~500 ms), não 4 Hz.
+4. **Durante `reconnecting`** (e em qualquer falha do link com dado anterior), o widget mostra o **último valor** com a **borda em vermelho**, indicando falha ou alerta. Isso substitui o "último valor esmaecido" da seção 2 e muda a regra de validade da seção 6: o valor não vai para `null` depois de 3 s; ele continua no snapshot, marcado como velho (`obdStale`/horário da leitura), e é o widget que pinta a borda.

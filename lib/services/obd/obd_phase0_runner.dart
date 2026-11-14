@@ -143,6 +143,7 @@ class ObdPhase0Runner {
     }
 
     await _timing();
+    await _headers();
     note('--- fim da sequência ---');
     return report;
   }
@@ -175,6 +176,24 @@ class ObdPhase0Runner {
       final raw = await _send(command, timeout: const Duration(seconds: 3));
       report.multiPid[command] = elmError(raw) ?? '${responseBytes(raw).length} bytes';
     }
+  }
+
+  /// Which ECUs answer, by CAN id. On the Nivus every mode 01 request got two
+  /// answers that ATH0 cannot tell apart (engine + probably the gearbox), so
+  /// phase 1 needs to know which one is the engine (usually 7E8) and whether
+  /// addressing it alone (ATSH7E0, physical) works — that would also halve the
+  /// traffic. Read only; ends back on headers off and the default functional
+  /// address (7DF), so the live run that may follow sees what it always did.
+  Future<void> _headers() async {
+    note('cabeçalhos: quais ECUs respondem');
+    await _send('ATH1');
+    await _send('0100', timeout: const Duration(seconds: 3));
+    final probe = report.supported.contains(0x0C) ? '010C' : '0100';
+    await _send(probe, timeout: const Duration(seconds: 3));
+    await _send('ATSH7E0');
+    await _send(probe, timeout: const Duration(seconds: 3));
+    await _send('ATSH7DF');
+    await _send('ATH0');
   }
 
   /// One quick look at the car: is the ECU answering, and the battery voltage.
