@@ -23,13 +23,14 @@ class DashcamConfigAdapter extends TypeAdapter<DashcamConfig> {
       resolution: fields[3] as VideoResolution,
       frameRate: fields[4] as int,
       enabled: fields[5] == null ? false : fields[5] as bool,
+      dualFrontPrimary: fields[6] == null ? false : fields[6] as bool,
     );
   }
 
   @override
   void write(BinaryWriter writer, DashcamConfig obj) {
     writer
-      ..writeByte(6)
+      ..writeByte(7)
       ..writeByte(0)
       ..write(obj.cameraSelection)
       ..writeByte(1)
@@ -41,7 +42,9 @@ class DashcamConfigAdapter extends TypeAdapter<DashcamConfig> {
       ..writeByte(4)
       ..write(obj.frameRate)
       ..writeByte(5)
-      ..write(obj.enabled);
+      ..write(obj.enabled)
+      ..writeByte(6)
+      ..write(obj.dualFrontPrimary);
   }
 
   @override

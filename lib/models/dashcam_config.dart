@@ -42,6 +42,7 @@ class DashcamConfig extends HiveObject {
     required this.resolution,
     required this.frameRate,
     this.enabled = false,
+    this.dualFrontPrimary = false,
   });
 
   @HiveField(0)
@@ -66,4 +67,11 @@ class DashcamConfig extends HiveObject {
   /// enables Dashcam in Settings.
   @HiveField(5, defaultValue: false)
   bool enabled;
+
+  /// With [CameraSelection.both] (2026-11-14): which camera fills the frame.
+  /// `false` (the default, and for every config stored before this field):
+  /// the back camera, with the front one as the picture-in-picture; `true`:
+  /// the front camera, with the back one as the PiP.
+  @HiveField(6, defaultValue: false)
+  bool dualFrontPrimary;
 }

@@ -10,6 +10,7 @@ import '../models/dashcam_clip_descriptor.dart';
 import '../models/dashcam_config.dart';
 import '../models/dashcam_status.dart';
 import 'dashcam_clip_files.dart';
+import 'dual_camera/dashcam_camera_platform.dart';
 
 /// A single recorded loop-recording segment on disk.
 class DashcamClip {
@@ -1341,6 +1342,29 @@ class DashcamService {
     // call competing with the post-rotation burst on the main thread (see
     // [_clipsDirectory]). A failure here is retried by the first promotion.
     unawaited(_clipsDirectory().then<void>((_) {}, onError: (Object _) {}));
+    // Dual camera ("Ambas", 2026-11-14): the composite's frame keeps the
+    // orientation of its bind, so a turn while recording closes the segment
+    // now (owner decision). Inert with one camera: nothing is ever emitted.
+    _segmentRotationRequests = DashcamCameraPlatform.segmentRotationRequests.listen((_) => rotateSegmentNow());
+  }
+
+  StreamSubscription<void>? _segmentRotationRequests;
+
+  /// The run the segment timer was last armed for — what [rotateSegmentNow]
+  /// rotates, exactly as a timer tick would.
+  _RotationRun? _currentRotationRun;
+
+  /// Closes the running segment now and starts the next one — the same
+  /// rotation a [segmentDuration] tick does ([_onRotationTick]: one waiting
+  /// rotation at most, the run's ownership checked, the same stop intent and
+  /// queue), only earlier. Used by the dual camera when the phone turns, so
+  /// the next segment is bound at the new orientation. `false` when nothing
+  /// is recording.
+  bool rotateSegmentNow() {
+    final run = _currentRotationRun;
+    if (run == null || _segmentTimer == null || !_isCurrentRotationRun(run)) return false;
+    _onRotationTick(run);
+    return true;
   }
 
   DashcamConfig _config;
@@ -3195,12 +3219,17 @@ class DashcamService {
   }
 
   CameraDescription _pickCamera(List<CameraDescription> cameras) {
+    // "Ambas" (2026-11-14): the composite camera DashcamCameraPlatform offers
+    // when the phone runs back and front at once — one CameraController like
+    // any other. Without it (not supported, or not installed) the rear camera.
+    if (_config.cameraSelection == CameraSelection.both) {
+      final name = _config.dualFrontPrimary ? DashcamCameraPlatform.frontPrimaryName : DashcamCameraPlatform.backPrimaryName;
+      final dual = cameras.where((camera) => camera.name == name).firstOrNull;
+      if (dual != null) return dual;
+    }
     final direction = switch (_config.cameraSelection) {
       CameraSelection.front => CameraLensDirection.front,
-      CameraSelection.rear => CameraLensDirection.back,
-      // "both" is not supported by a single CameraController; default to
-      // the rear camera until dual-camera capture is implemented.
-      CameraSelection.both => CameraLensDirection.back,
+      CameraSelection.rear || CameraSelection.both => CameraLensDirection.back,
     };
     return cameras.firstWhere(
       (camera) => camera.lensDirection == direction,
@@ -3667,6 +3696,7 @@ class DashcamService {
     // tick carries it instead of looking up "whoever is recording" when it
     // eventually runs. See [_RotationRun].
     final run = _RotationRun(startEpoch: _startIntentEpoch, controller: controller);
+    _currentRotationRun = run;
     _segmentTimer = Timer.periodic(segmentDuration, (_) => _onRotationTick(run));
     segmentTimerArmedHookForTest?.call(() => _onRotationTick(run));
     _adoptSegmentEvidence();
@@ -4772,6 +4802,7 @@ class DashcamService {
     _noteLateRestart(decision);
     if (decision == _LateRestartDecision.adopted) {
       _segmentTimer?.cancel();
+      _currentRotationRun = run;
       _segmentTimer = Timer.periodic(segmentDuration, (_) => _onRotationTick(run));
       segmentTimerArmedHookForTest?.call(() => _onRotationTick(run));
       _adoptSegmentEvidence();
@@ -5975,6 +6006,8 @@ class DashcamService {
   /// once this instance is terminal).
   Future<void> dispose() {
     _disposed = true;
+    unawaited(_segmentRotationRequests?.cancel());
+    _segmentRotationRequests = null;
     _segmentTimer?.cancel();
     _segmentTimer = null;
     _isRecording = false;

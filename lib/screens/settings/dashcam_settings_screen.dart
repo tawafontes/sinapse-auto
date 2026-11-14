@@ -3,6 +3,7 @@ import 'package:permission_handler/permission_handler.dart';
 
 import '../../models/dashcam_config.dart';
 import '../../services/dashcam_preferences.dart';
+import '../../services/dual_camera/dashcam_camera_platform.dart';
 import '../sessions/dashcam_recordings_screen.dart';
 
 /// Dashcam configuration (Fase 15) — reads/writes [DashcamPreferencesScope],
@@ -10,12 +11,21 @@ import '../sessions/dashcam_recordings_screen.dart';
 /// shape (a plain [StatelessWidget] over a single reactive preferences
 /// object, radio-style option tiles for discrete choices).
 ///
-/// [CameraSelection.both] is deliberately not offered here — it's explicitly
-/// unimplemented (`DashcamService._pickCamera` falls back to the rear
-/// camera for it), matching this app's "retire/hide, never silently no-op"
-/// convention for unfinished options.
+/// [CameraSelection.both] ("Ambas", 2026-11-14) is offered only where the
+/// phone runs the back and front cameras at once ([dualSupported]) — hidden,
+/// never a silent no-op, elsewhere (this app's convention). With it comes the
+/// choice of the camera that fills the frame (owner decision).
 class DashcamSettingsScreen extends StatelessWidget {
-  const DashcamSettingsScreen({super.key});
+  const DashcamSettingsScreen({super.key, this.dualSupported});
+
+  /// Whether "Ambas" can be offered; asks the app's camera platform when
+  /// `null` (tests pass a value).
+  final Future<bool> Function()? dualSupported;
+
+  static Future<bool> _askPlatform() async {
+    final platform = DashcamCameraPlatform.installed;
+    return platform != null && await platform.dualSupported();
+  }
 
   Future<void> _toggleAudio(BuildContext context, DashcamPreferences prefs, bool value) async {
     if (!value) {
@@ -75,6 +85,45 @@ class DashcamSettingsScreen extends StatelessWidget {
               label: 'Frontal',
               selected: prefs.cameraSelection == CameraSelection.front,
               onTap: () => prefs.setCameraSelection(CameraSelection.front),
+            ),
+            _DualCameraOptions(
+              supported: dualSupported ?? _askPlatform,
+              builder: (context, snapshot) {
+                if (snapshot.data != true) return const SizedBox.shrink();
+                final both = prefs.cameraSelection == CameraSelection.both;
+                return Column(
+                  children: [
+                    _OptionTile(
+                      key: const ValueKey('dashcamSettings_both'),
+                      label: 'Ambas (traseira e frontal no mesmo vídeo)',
+                      selected: both,
+                      onTap: () => prefs.setCameraSelection(CameraSelection.both),
+                    ),
+                    if (both) ...[
+                      const Padding(
+                        padding: EdgeInsets.fromLTRB(16, 8, 16, 4),
+                        child: Text('Câmera principal', style: TextStyle(fontWeight: FontWeight.bold)),
+                      ),
+                      _OptionTile(
+                        key: const ValueKey('dashcamSettings_backPrimary'),
+                        label: 'Traseira, com a frontal no canto',
+                        selected: !prefs.dualFrontPrimary,
+                        onTap: () => prefs.setDualFrontPrimary(false),
+                      ),
+                      _OptionTile(
+                        key: const ValueKey('dashcamSettings_frontPrimary'),
+                        label: 'Frontal, com a traseira no canto',
+                        selected: prefs.dualFrontPrimary,
+                        onTap: () => prefs.setDualFrontPrimary(true),
+                      ),
+                      const Padding(
+                        padding: EdgeInsets.fromLTRB(16, 0, 16, 8),
+                        child: Text('Com as duas câmeras o vídeo é gravado em 720p. Ao girar o celular gravando, o vídeo para por cerca de 1 s.'),
+                      ),
+                    ],
+                  ],
+                );
+              },
             ),
             const Divider(height: 32),
             const Padding(
@@ -150,8 +199,27 @@ class DashcamSettingsScreen extends StatelessWidget {
   }
 }
 
+/// Asks once whether "Ambas" can be offered, then builds with the answer —
+/// the question is not repeated on every preference change.
+class _DualCameraOptions extends StatefulWidget {
+  const _DualCameraOptions({required this.supported, required this.builder});
+
+  final Future<bool> Function() supported;
+  final AsyncWidgetBuilder<bool> builder;
+
+  @override
+  State<_DualCameraOptions> createState() => _DualCameraOptionsState();
+}
+
+class _DualCameraOptionsState extends State<_DualCameraOptions> {
+  late final Future<bool> _supported = widget.supported();
+
+  @override
+  Widget build(BuildContext context) => FutureBuilder<bool>(future: _supported, builder: widget.builder);
+}
+
 class _OptionTile extends StatelessWidget {
-  const _OptionTile({required this.label, required this.selected, required this.onTap});
+  const _OptionTile({super.key, required this.label, required this.selected, required this.onTap});
 
   final String label;
   final bool selected;

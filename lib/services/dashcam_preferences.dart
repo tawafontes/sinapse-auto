@@ -49,6 +49,9 @@ class DashcamPreferences extends ChangeNotifier {
   bool get audioEnabled => _config.audioEnabled;
   int get storageQuotaMb => _config.storageQuotaMb;
 
+  /// With "Ambas": the front camera fills the frame (the back one is the PiP).
+  bool get dualFrontPrimary => _config.dualFrontPrimary;
+
   Future<void> setEnabled(bool value) => _update(() => _config.enabled = value);
 
   Future<void> setCameraSelection(CameraSelection value) =>
@@ -58,6 +61,8 @@ class DashcamPreferences extends ChangeNotifier {
       _update(() => _config.resolution = value);
 
   Future<void> setFrameRate(int value) => _update(() => _config.frameRate = value);
+
+  Future<void> setDualFrontPrimary(bool value) => _update(() => _config.dualFrontPrimary = value);
 
   /// Callers must have already obtained `Permission.microphone` before
   /// enabling audio — this preferences object only persists the choice, it

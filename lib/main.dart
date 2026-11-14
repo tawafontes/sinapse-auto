@@ -12,6 +12,7 @@ import 'services/dashcam_preferences.dart';
 import 'services/dashcam_storage_quota.dart' show measureDashcamStorageAtStartup;
 import 'services/driving_session_host.dart';
 import 'services/driving_session_recorder.dart' show recoverDrivingSessionsAtStartup;
+import 'services/dual_camera/dashcam_camera_platform.dart';
 import 'services/hive_boxes.dart';
 import 'services/obd/obd_preferences.dart';
 import 'services/power_profile_preferences.dart';
@@ -22,6 +23,10 @@ import 'services/unit_preferences.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // The dashcam's "Ambas" mode: the app's CameraPlatform wraps the camera
+  // plugin (Android only). Here, not in bootstrapApp, so app tests keep the
+  // fake camera platform they install.
+  DashcamCameraPlatform.install();
   await bootstrapApp();
   runApp(const SynapseAutoApp());
 }
