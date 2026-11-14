@@ -90,6 +90,39 @@ void main() {
     await unmount(tester, service);
   });
 
+  testWidgets('Desconectar is no failure: no last value, no red border', (tester) async {
+    // Owner, 2026-11-14: after "Desconectar" the battery card stayed red at 12 V.
+    final (service, alerts) = await mount(tester, signal: ObdSignal.adapterVoltage);
+    service.connect();
+    await tester.pump(const Duration(seconds: 3));
+    expect(find.text('13,3'), findsOneWidget);
+
+    await service.disconnect();
+    await tester.pump();
+    await tester.pump();
+    expect(find.text('13,3'), findsNothing);
+    expect(find.text('OBD desligado'), findsOneWidget);
+    expect(alerts.whereType<Color>(), isEmpty, reason: 'never a red border');
+    await unmount(tester, service);
+  });
+
+  testWidgets('the car switched off: "Ligue o carro" for the engine, the battery stays live', (tester) async {
+    final (service, alerts) = await mount(tester, signal: ObdSignal.rpm);
+    service.connect();
+    await tester.pump(const Duration(seconds: 4));
+    expect(find.text('982'), findsOneWidget);
+
+    car.ignition = FakeIgnition.off;
+    await tester.pump(const Duration(seconds: 3));
+    await tester.pump();
+    expect(service.state, ObdLinkState.waitingForCar);
+    expect(find.text('982'), findsNothing);
+    expect(find.text('Ligue o carro'), findsOneWidget);
+    expect(alerts.whereType<Color>(), isEmpty, reason: 'the car being off is no failure');
+    expect(service.isFresh(ObdSignal.adapterVoltage), isTrue, reason: 'the adapter still reads the 12 V');
+    await unmount(tester, service);
+  });
+
   testWidgets('a value the car does not report', (tester) async {
     // Take coolant (05) out of the engine's map: a car that does not report it.
     car.engine.bitmaps[0x00] = [0xB6, 0x3E, 0xB8, 0x13]; // bit for 05 cleared

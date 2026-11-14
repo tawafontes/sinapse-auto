@@ -137,8 +137,16 @@ class _ObdSignalViewState extends State<ObdSignalView> {
       value = widget.previewValue;
       stale = false;
     } else {
-      value = service?.readings[widget.signal]?.value;
-      stale = value != null && !(service?.isFresh(widget.signal) ?? false);
+      final last = service?.readings[widget.signal]?.value;
+      final fresh = service?.isFresh(widget.signal) ?? false;
+      // The last value with a red border only while the LINK is failing
+      // (owner decision, 2026-11-13: "quando a conexão cai"). Disconnected by
+      // hand, or the car switched off, is no failure (owner, 2026-11-14: the
+      // battery card stayed red at 12 V after "Desconectar"): the card says
+      // so instead ("OBD desligado", "Ligue o carro").
+      final linkFailing = service?.state == ObdLinkState.reconnecting;
+      value = fresh || linkFailing ? last : null;
+      stale = value != null && !fresh;
     }
     _reportAlert(stale ? dashboardAlertColor(EventSeverity.critical, theme.brightness) : null);
 
