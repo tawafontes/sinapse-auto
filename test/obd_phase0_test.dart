@@ -117,7 +117,7 @@ void main() {
       expect(car.sent.where((c) => c.startsWith('04')), isEmpty, reason: 'never clears codes');
       expect(car.sent.every((c) => c.startsWith('AT') || RegExp(r'^(01|03|07|09|0A)').hasMatch(c)), isTrue);
       // The headers step runs last and leaves the adapter as the live run expects it.
-      expect(car.sent, containsAllInOrder(['ATH1', '0100', '010C', 'ATSH7E0', '010C', '0100', '010C040D11', '010542', 'ATSH7DF', 'ATH0']));
+      expect(car.sent, containsAllInOrder(['ATH1', '0100', '010C', 'ATSH7E0', '010C', '0100', '0120', '0140', '010C040D11', '010542', 'ATSH7DF', 'ATH0']));
       expect(car.sent.last, 'ATH0');
 
       expect(r.connectMethod, 'secure');

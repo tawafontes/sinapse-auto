@@ -196,7 +196,13 @@ class ObdPhase0Runner {
     // then the fast and slow groups as single multi-PID requests. A fixed list
     // on purpose — the map decoded above may have come from the other ECU (it
     // did on the Nivus' first run); a PID the engine lacks is just left out.
-    await _send('0100', timeout: const Duration(seconds: 3), decode: _describeBitmap(0x00));
+    // The whole chain, not only 0100: on the Nivus the order of the two ECUs'
+    // answers changed even between 0100 and 0120 of one run.
+    // 0160 is left out: never asked unless announced, and neither ECU of the
+    // Nivus announces it.
+    for (final base in [0x00, 0x20, 0x40]) {
+      await _send('01${_hex(base)}', timeout: const Duration(seconds: 3), decode: _describeBitmap(base));
+    }
     await _send('010C040D11', timeout: const Duration(seconds: 3));
     await _send('010542', timeout: const Duration(seconds: 3));
     await _send('ATSH7DF');

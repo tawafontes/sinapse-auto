@@ -38,15 +38,34 @@ Todo pedido do modo 01 enviado ao endereço funcional (`7DF`, o padrão) recebe 
 
 - **Endereçar só o motor funciona:** depois de `ATSH7E0`, o `010C` recebeu **uma** resposta, só do `7E8`, em 51 ms.
 - **Correção da análise da rodada 1:** a ferramenta decodifica só a **primeira** resposta. Na rodada 1, a primeira foi a do `7E9`, e o mapa saiu com 12 PIDs, sem MAP. A conclusão de que o carro "não tem MAF nem MAP" **estava errada**. Na rodada 2, a primeira foi a do `7E8`, e o mapa saiu com 23 PIDs.
-- **Mapa real do motor (`7E8`)**, juntando `0100`, `0120` e `0140`: `01 03 04 05 06 07 0B 0C 0D 0E 0F 11 13 14 15 1C 1F 20 40 41 42 43 49`.
+- **A ordem muda até dentro da mesma rodada** (22:51: o `0100` veio primeiro do `7E9` e o `0120`, do `7E8`). Só um mapa lido já endereçado ao motor é confiável.
+- **Mapa exato do motor (`7E8`)**, lido com `ATSH7E0` na rodada das 22:58 (39 PIDs; o `0160` não é anunciado):
+
+| Bloco | Bitmap | PIDs |
+|---|---|---|
+| `0100` | `BE3EB813` | `01 03 04 05 06 07 0B 0C 0D 0E 0F 11 13 14 15 1C 1F 20` |
+| `0120` | `A007A011` | `21 23 2E 2F 30 31 33 3C 40` |
+| `0140` | `FED0C000` | `41 42 43 44 45 46 47 49 4A 4C 51 52` |
+
+  Mapa da 2ª ECU (`7E9`): `0100` = `98188001`, `0120` = `00000001`, `0140` = `E0800000` → `01 04 05 0C 0D 11 20 40 41 42 43 49`.
 
 | Interesse | Suporte no motor (`7E8`) |
 |---|---|
 | `0C` rotação · `05` temperatura do motor · `04` carga · `42` tensão do módulo | ✅ os quatro sensores da fase 1 |
 | `0D` velocidade · `11` acelerador · `43` carga absoluta · `49` pedal D | ✅ |
 | **`0B` MAP** · `0F` temperatura do ar de admissão · `06`/`07` ajuste de combustível · `14`/`15` sondas lambda · `0E` avanço | ✅ → consumo por MAP (fase 2) **é viável** neste carro |
-| `10` MAF | ❌ |
-| `2F` nível do tanque · `51` tipo de combustível · `5B` bateria híbrida | ❌ |
+| **`2F` nível do tanque** · `51` tipo de combustível · **`52` % de etanol** (flex) | ✅ |
+| `33` pressão barométrica · `46` temperatura ambiente · `3C` temperatura do catalisador · `31` distância desde que os códigos foram apagados | ✅ |
+| `10` MAF · `5B` bateria híbrida | ❌ |
+
+### Polling da fase 1, endereçado só ao motor (rodadas das 22:51 e 22:58)
+
+| Pedido | Tempo | Resposta |
+|---|---|---|
+| Grupo rápido `010C040D11` | 71 / 175 ms | 2 quadros ISO-TP (`7E8 10 0A …` + `7E8 21 …`): rpm, carga, velocidade e acelerador |
+| Grupo lento `010542` | 59 / 124 ms | 1 quadro: temperatura do motor e tensão do módulo |
+
+A 2 Hz, o grupo rápido ocupa o link só 15–35% do tempo. O decodificador da fase 1 precisa juntar os quadros da resposta multi-frame.
 
 ## 4. Tempo
 
