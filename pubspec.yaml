@@ -53,16 +53,16 @@ dependencies:
   path_provider: ^2.1.6
   permission_handler: ^12.0.3
   video_player: ^2.9.2
+  # The dashcam's "Ambas" mode (2026-11-14) is a CameraPlatform of the app's
+  # own (lib/services/dual_camera/dashcam_camera_platform.dart), wrapping the
+  # camera plugin. Already a transitive dependency via `camera`, same pinned
+  # version; moved here from dev_dependencies (where test fakes of the real
+  # CameraController imported it since Fase 15) because lib/ now imports it.
+  camera_platform_interface: ^2.13.1
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
-
-  # Imported directly by test/support/fake_camera_platform.dart — a fake
-  # CameraPlatform for exercising the real CameraController class in unit
-  # tests (Fase 15). Already a transitive dependency via `camera`; declared
-  # directly here since it's imported directly.
-  camera_platform_interface: ^2.13.1
 
   # Imported directly by test/support/fake_video_player_platform.dart — same
   # rationale as camera_platform_interface above, but for exercising the real
