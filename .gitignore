@@ -49,3 +49,9 @@ app.*.map.json
 
 # Kotlin compiler local cache
 android/.kotlin/
+
+# Local working files (app data backups, OBD transcripts with the VIN)
+scratchpad/
+
+# Android Gradle build output
+android/build/
