@@ -6,6 +6,7 @@ import '../../models/sensor_reading.dart';
 import '../../models/unit_system.dart';
 import '../../services/altitude_trend.dart';
 import '../../services/dashboard_sensor_streams.dart';
+import '../../services/driving_session_host.dart';
 import '../../services/gnss_quality.dart';
 import '../../services/unit_preferences.dart';
 import 'dual_camera_probe_screen.dart';
@@ -291,7 +292,15 @@ class _DiagnosticsScreenState extends State<DiagnosticsScreen> {
               title: const Text('Teste do adaptador OBD-II'),
               subtitle: const Text('Fase 0: lê o carro e grava a transcrição'),
               trailing: const Icon(Icons.chevron_right),
-              onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const ObdPhase0Screen())),
+              // The test tool opens its own link: the app's OBD service lets
+              // the adapter go while it runs, and picks it up again after.
+              onTap: () async {
+                final obd = DrivingSessionScope.maybeOf(context)?.obd;
+                await obd?.pause();
+                if (!context.mounted) return;
+                await Navigator.of(context).push(MaterialPageRoute(builder: (_) => const ObdPhase0Screen()));
+                obd?.resume();
+              },
             ),
             // Dashcam dual camera phase 0 (2026-11-13): likewise a test tool,
             // until the dashcam records both cameras itself.

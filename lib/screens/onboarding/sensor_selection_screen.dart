@@ -46,7 +46,7 @@ class _SensorSelectionScreenState extends State<SensorSelectionScreen> {
     final existing = SensorWidgetRepository.all.map((c) => c.sensorType).toSet();
     // First run: everything but the OBD-II tools, which need an adapter —
     // without one they would only say "Configurar adaptador".
-    _selected = existing.isNotEmpty ? existing : {...sensorTypeMetadata.keys.where((t) => !obdSignalForSensor.containsKey(t))};
+    _selected = existing.isNotEmpty ? existing : {...sensorTypeMetadata.keys.where((t) => !obdSensorTypes.contains(t))};
   }
 
   void _toggle(SensorType type, bool value) {

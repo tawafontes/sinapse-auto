@@ -25,3 +25,13 @@ const Map<SensorType, SensorTypeMetadata> sensorTypeMetadata = {
   SensorType.batteryVoltage: SensorTypeMetadata(label: 'Bateria', icon: Icons.battery_charging_full, unit: 'V'),
   SensorType.engineLoad: SensorTypeMetadata(label: 'Carga do motor', icon: Icons.speed, unit: '%'),
 };
+
+/// The sensors read from the car through the OBD-II adapter (phase 1). Left
+/// out of the first-run dashboard and the first-run selection: without an
+/// adapter they would only say "Configurar adaptador".
+const Set<SensorType> obdSensorTypes = {
+  SensorType.engineRpm,
+  SensorType.engineCoolant,
+  SensorType.batteryVoltage,
+  SensorType.engineLoad,
+};

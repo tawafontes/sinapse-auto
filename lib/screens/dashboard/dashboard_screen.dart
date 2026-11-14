@@ -24,6 +24,7 @@ import '../../widgets/dashboard/page_indicator_dots.dart';
 import '../../widgets/dashboard/page_manager_sheet.dart';
 import '../../widgets/dashboard/resize_ghost_overlay.dart';
 import '../../widgets/dashcam/dashcam_preview_view.dart';
+import '../../widgets/dashboard/obd_status_icon.dart';
 import '../../widgets/dashcam/dashcam_rec_indicator.dart';
 import '../../widgets/sensors/sensor_widget_factory.dart';
 import '../onboarding/sensor_selection_screen.dart';
@@ -1206,6 +1207,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       actions: [
         IconButton(icon: const Icon(Icons.add), tooltip: 'Adicionar ferramenta', onPressed: _addTool),
         DashcamRecIndicator(controller: _session.dashcamController, onTap: _openDashcamFullscreen),
+        if (_session.obd case final obd?) ObdStatusIcon(service: obd),
         IconButton(
           icon: const Icon(Icons.settings_backup_restore),
           tooltip: 'Resetar e calibrar sistema',

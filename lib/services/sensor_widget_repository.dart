@@ -53,8 +53,10 @@ class SensorWidgetRepository {
   /// its first frame, in [sensorTypeMetadata]'s order. Never touches an
   /// existing widget. Called only when the first onboarding completes (see
   /// `ThemeSelectionScreen`), so a widget the user deletes later stays deleted.
+  /// The OBD-II tools are left out ([obdSensorTypes]): they are added from
+  /// "+" once there is an adapter.
   static Future<void> addDefaultWidgets() async {
-    for (final type in sensorTypeMetadata.keys) {
+    for (final type in sensorTypeMetadata.keys.where((t) => !obdSensorTypes.contains(t))) {
       final styles = validDisplayStylesForSensor[type];
       if (styles == null || styles.isEmpty || forSensor(type) != null) continue;
       await upsertStyle(type, styles.first);

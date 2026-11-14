@@ -205,13 +205,16 @@ class DrivingSessionHost {
   /// engine stopped — so the trigger is the engine turning (rpm > 0) or the
   /// car moving (OBD speed > 0, which also covers a plug-in hybrid driving
   /// electric with the engine at 0 rpm).
+  ///
+  /// Once per time the car comes on: re-armed only when the car itself goes
+  /// quiet (waiting for it). A dropped link or a trip to the background is
+  /// not a new start — found by the phase 1 app test: after a pulled adapter,
+  /// a session stopped by hand was started again with the engine still on.
   void _maybeAutoStartSession() {
     final obd = this.obd;
     if (obd == null || _disposed) return;
-    if (obd.state != ObdLinkState.receiving) {
-      _autoStartArmed = true;
-      return;
-    }
+    if (obd.state == ObdLinkState.waitingForCar) _autoStartArmed = true;
+    if (obd.state != ObdLinkState.receiving) return;
     if (!_autoStartArmed || !_inForeground || !obd.preferences.autoStartSession) return;
     if (recorder.state != DrivingSessionRecorderState.idle) return;
     double live(ObdSignal signal) => obd.isFresh(signal) ? obd.readings[signal]?.value ?? 0 : 0;
