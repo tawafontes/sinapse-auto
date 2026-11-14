@@ -129,7 +129,23 @@ Testes: `test/dashcam_dual_camera_test.dart` (plataforma com um `CameraControlle
 `test/dashcam_dual_settings_test.dart` (tela e persistência, incluindo um registro no formato antigo).
 Suíte: **1616 testes passando** no Flutter 3.44.7.
 
-### O que validar no aparelho (ainda não feito)
+### Validado no aparelho (SM-S918B, 2026-11-14)
+
+- As duas câmeras ligam em "Ambas" (preview 1920×1080, vídeo 720p) e a imagem composta aparece
+  **sem distorção, em pé, em retrato e nas duas paisagens** (confirmado pelo dono).
+- Girar gravando fecha o segmento na hora e o seguinte é gravado na orientação nova — conferido
+  dentro dos arquivos: segmentos alternando 720×1280 e 1280×720, conforme os giros.
+- Correção encontrada no aparelho: o plugin só observa a orientação do aparelho depois de abrir uma
+  câmera própria, o que nunca acontece em "Ambas"; a dashcam ficava em retrato após um giro. Agora o
+  `DualCameraRecorder.kt` informa a rotação da tela (`DisplayListener`).
+
+### O que ainda validar
+
+- Reproduzir os clipes em Gravações com a telemetria; trocar a câmera principal (PiP invertido).
+- Viagem real: aquecimento, bateria, rotação de segmentos (histórico de START atrasado 7–20 s
+  após rotação), armazenamento e cota.
+
+### Roteiro original de validação
 
 1. Configurações > Dashcam: "Ambas" aparece no S23; a câmera principal muda o PiP.
 2. **Preview:** a imagem composta aparece em pé, sem distorção, em retrato e nas duas paisagens.

@@ -38,6 +38,12 @@ class FakeDualCameraBridge implements DualCameraBridge {
   @override
   Stream<DualCameraEvent> get events => _events.stream;
 
+  /// What the native DisplayListener reports on a turn.
+  void turnDisplay(int degrees) {
+    displayRotation = degrees;
+    _events.add(DualCameraEvent('displayRotation', {'degrees': degrees}));
+  }
+
   DualCameraOpened _opened() {
     boundRotation = displayRotation;
     return (textureId: 7, handlesCropAndRotation: true, previewWidth: 1280, previewHeight: 720, video: '1280x720', displayRotation: displayRotation);
@@ -191,6 +197,22 @@ void main() {
       await controller.stopVideoRecording();
       await controller.dispose();
       await sub.cancel();
+    });
+
+    test('the orientation comes from the composite itself: the plugin, with no camera of its own, says nothing', () async {
+      // Found on the S23: the plugin's orientation stream stays silent in
+      // "Ambas", so a turn left the dashcam in portrait.
+      final description = (await platform.availableCameras()).firstWhere((c) => c.name == DashcamCameraPlatform.backPrimaryName);
+      final controller = CameraController(description, ResolutionPreset.high, enableAudio: false);
+      await controller.initialize();
+
+      dual.turnDisplay(90);
+      await until(() => controller.value.deviceOrientation == DeviceOrientation.landscapeLeft, label: 'landscape reaches the controller');
+      await until(() => dual.calls.contains('rebind'), label: 'rebind on the turn');
+
+      dual.turnDisplay(270);
+      await until(() => controller.value.deviceOrientation == DeviceOrientation.landscapeRight, label: 'the other landscape');
+      await controller.dispose();
     });
 
     test('the plugin\'s cameras go to the plugin untouched, its evidence included', () async {

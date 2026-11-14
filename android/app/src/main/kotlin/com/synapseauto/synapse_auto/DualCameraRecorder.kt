@@ -2,8 +2,12 @@ package com.synapseauto.synapse_auto
 
 import android.Manifest
 import android.annotation.SuppressLint
+import android.content.Context
 import android.content.pm.PackageManager
+import android.hardware.display.DisplayManager
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.view.Surface
 import androidx.camera.core.AspectRatio
 import androidx.camera.core.CameraSelector
@@ -77,6 +81,37 @@ class DualCameraRecorder(
     private var previewWidth = 0
     private var previewHeight = 0
 
+    /**
+     * The display's rotation, reported to Dart while the cameras are open.
+     * Found on the S23 (2026-11-14): the app learns the device orientation from
+     * the camera plugin, which only watches it once IT has opened a camera — in
+     * "Ambas" the plugin opens none, so the dashcam stayed in portrait after a
+     * turn. This is that source for the composite.
+     */
+    private val displayManager = activity.getSystemService(Context.DISPLAY_SERVICE) as DisplayManager
+    private var reportedRotation: Int? = null
+    private val displayListener = object : DisplayManager.DisplayListener {
+        override fun onDisplayAdded(displayId: Int) {}
+        override fun onDisplayRemoved(displayId: Int) {}
+        override fun onDisplayChanged(displayId: Int) = reportRotation()
+    }
+    private var watchingDisplay = false
+
+    private fun reportRotation() {
+        val rotation = displayRotation()
+        if (rotation == reportedRotation) return
+        reportedRotation = rotation
+        emit("displayRotation", mapOf("degrees" to rotation * 90))
+    }
+
+    private fun watchDisplay() {
+        if (watchingDisplay) return
+        watchingDisplay = true
+        reportedRotation = null
+        displayManager.registerDisplayListener(displayListener, Handler(Looper.getMainLooper()))
+        reportRotation()
+    }
+
     init {
         channel.setMethodCallHandler { call, result ->
             try {
@@ -84,7 +119,9 @@ class DualCameraRecorder(
                     "isSupported" -> withProvider(result) { result.success(isSupported(it)) }
                     "open" -> withProvider(result) {
                         primaryFront = call.argument<String>("primary") == "front"
-                        result.success(bind(it))
+                        val opened = bind(it)
+                        watchDisplay()
+                        result.success(opened)
                     }
                     "rebind" -> {
                         val provider = provider ?: throw DualError("not_open", "open the cameras first")
@@ -277,6 +314,10 @@ class DualCameraRecorder(
 
     /** Stops a recording, leaves concurrent mode and releases the texture. */
     fun close() {
+        if (watchingDisplay) {
+            displayManager.unregisterDisplayListener(displayListener)
+            watchingDisplay = false
+        }
         recording?.stop()
         recording = null
         recordingToken = null

@@ -70,6 +70,12 @@ class DashcamCameraPlatform extends CameraPlatform implements RecordingEvidenceS
   ValueListenable<RecordingEvidence?>? _innerEvidence;
   final ValueNotifier<RecordingEvidence?> _evidence = ValueNotifier(null);
   late final StreamSubscription<DualCameraEvent> _events;
+
+  /// The device orientation while the composite is open, from
+  /// `DualCameraRecorder.kt`. Found on the S23 (2026-11-14): the plugin only
+  /// watches the orientation once it has opened a camera of its own, which it
+  /// never does in "Ambas" — after a turn the dashcam stayed in portrait.
+  final _dualOrientations = StreamController<DeviceOrientationChangedEvent>.broadcast();
   bool? _supported;
 
   /// Camera ids handed out for the composite, far from the plugin's (0, 1, …).
@@ -150,7 +156,7 @@ class DashcamCameraPlatform extends CameraPlatform implements RecordingEvidenceS
     camera.opened = opened;
     camera.boundOrientation = _orientationForRotation(opened.displayRotation);
     debugPrint('dual camera: open texture=${opened.textureId} preview=${opened.previewWidth}x${opened.previewHeight} video=${opened.video} display=${opened.displayRotation}°');
-    camera.orientation = inner.onDeviceOrientationChanged().listen((event) => _onTurn(camera, event.orientation));
+    camera.orientation = onDeviceOrientationChanged().listen((event) => _onTurn(camera, event.orientation));
     camera.initialized.add(CameraInitializedEvent(
       cameraId,
       opened.previewWidth.toDouble(),
@@ -200,6 +206,11 @@ class DashcamCameraPlatform extends CameraPlatform implements RecordingEvidenceS
     final camera = _camera;
     if (camera == null) return;
     switch (event.kind) {
+      case 'displayRotation':
+        final orientation = _orientationForRotation((event.data['degrees'] as num?)?.toInt() ?? 0);
+        if (orientation != camera.deviceOrientation.value) {
+          _dualOrientations.add(DeviceOrientationChangedEvent(orientation));
+        }
       case 'transform':
         camera.rotationDegrees.value = event.rotationDegrees ?? 0;
       case 'progress':
@@ -241,7 +252,25 @@ class DashcamCameraPlatform extends CameraPlatform implements RecordingEvidenceS
       _isDual(cameraId) ? const Stream.empty() : inner.onVideoRecordedEvent(cameraId);
 
   @override
-  Stream<DeviceOrientationChangedEvent> onDeviceOrientationChanged() => inner.onDeviceOrientationChanged();
+  Stream<DeviceOrientationChangedEvent> onDeviceOrientationChanged() {
+    // The plugin's orientation (its own cameras) and the composite's.
+    late final StreamController<DeviceOrientationChangedEvent> merged;
+    final subscriptions = <StreamSubscription<DeviceOrientationChangedEvent>>[];
+    merged = StreamController<DeviceOrientationChangedEvent>.broadcast(
+      onListen: () {
+        subscriptions
+          ..add(inner.onDeviceOrientationChanged().listen(merged.add, onError: merged.addError))
+          ..add(_dualOrientations.stream.listen(merged.add));
+      },
+      onCancel: () async {
+        for (final s in subscriptions) {
+          await s.cancel();
+        }
+        subscriptions.clear();
+      },
+    );
+    return merged.stream;
+  }
 
   @override
   Future<void> lockCaptureOrientation(int cameraId, DeviceOrientation orientation) async {
