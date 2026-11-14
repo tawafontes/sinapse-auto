@@ -105,7 +105,14 @@ class ObdBridge(private val context: Context, messenger: BinaryMessenger) {
     private fun connect(address: String): Map<String, Any> {
         disconnect()
         val adapter = adapter()
-        adapter.cancelDiscovery()
+        // An ongoing discovery slows RFCOMM connects, but on Android 12+
+        // cancelDiscovery() needs BLUETOOTH_SCAN, which this app deliberately does
+        // not hold (it never scans). Found on the real S23: the call threw and every
+        // connect failed before trying a socket. Best effort only.
+        try {
+            adapter.cancelDiscovery()
+        } catch (_: SecurityException) {
+        }
         val device: BluetoothDevice = adapter.getRemoteDevice(address)
         val started = SystemClock.elapsedRealtime()
         val attempts = listOf<Pair<String, () -> BluetoothSocket>>(
