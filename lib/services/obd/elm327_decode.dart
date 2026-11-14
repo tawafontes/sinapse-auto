@@ -193,9 +193,11 @@ double? mode01Physical(int pid, List<int> d) {
   final ab = d.length >= 2 ? d[0] * 256 + d[1] : d[0];
   return switch (pid) {
     0x0C => ab / 4,
-    0x04 || 0x11 || 0x2F || 0x5B => a * 100 / 255,
+    0x04 || 0x11 || 0x2F || 0x49 || 0x52 || 0x5B => a * 100 / 255,
     0x05 || 0x0F || 0x46 => (a - 40).toDouble(),
-    0x0D => a.toDouble(),
+    0x0B || 0x0D || 0x33 => a.toDouble(),
+    0x10 => ab / 100,
+    0x3C => ab / 10 - 40,
     0x42 => ab / 1000,
     _ => null,
   };

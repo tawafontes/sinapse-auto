@@ -87,4 +87,8 @@ const Map<SensorType, Color> perWidgetAccentColors = {
   SensorType.engineCoolant: Color(0xFF00BCD4),
   SensorType.batteryVoltage: Color(0xFF8BC34A),
   SensorType.engineLoad: Color(0xFF795548),
+  SensorType.fuelLevel: Color(0xFFFFC107),
+  SensorType.engineTemperatures: Color(0xFFE91E63),
+  SensorType.accelerator: Color(0xFF607D8B),
+  SensorType.fuelConsumption: Color(0xFF4CAF50),
 };

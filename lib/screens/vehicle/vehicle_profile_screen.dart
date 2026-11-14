@@ -25,6 +25,7 @@ class _VehicleProfileScreenState extends State<VehicleProfileScreen> {
   final _formKey = GlobalKey<FormState>();
   late final TextEditingController _nickname;
   late final TextEditingController _tank;
+  late final TextEditingController _displacement;
   late final Map<FuelType, TextEditingController> _reference;
   late VehicleFuelSystem _fuelSystem;
   late FuelType _defaultFuel;
@@ -41,6 +42,7 @@ class _VehicleProfileScreenState extends State<VehicleProfileScreen> {
     final profile = VehicleRepository.profile;
     _nickname = TextEditingController(text: profile?.nickname ?? '');
     _tank = TextEditingController(text: editableNumber(profile?.tankCapacityLiters));
+    _displacement = TextEditingController(text: editableNumber(profile?.engineDisplacementLiters));
     _reference = {
       for (final fuel in FuelType.values) fuel: TextEditingController(text: editableNumber(profile?.referenceKmPerLiter(fuel))),
     };
@@ -57,6 +59,7 @@ class _VehicleProfileScreenState extends State<VehicleProfileScreen> {
   void dispose() {
     _nickname.dispose();
     _tank.dispose();
+    _displacement.dispose();
     _battery.dispose();
     _electricRange.dispose();
     _kwhPrice.dispose();
@@ -127,6 +130,7 @@ class _VehicleProfileScreenState extends State<VehicleProfileScreen> {
       electricRangeKm: plugIn ? parseDecimal(_electricRange.text, dotGroupsThousands: true) : null,
       autoUpdateReferences: _autoUpdate,
       defaultPricePerKwh: plugIn && _kwhPrice.text.trim().isNotEmpty ? parseDecimal(_kwhPrice.text) : null,
+      engineDisplacementLiters: _displacement.text.trim().isEmpty ? null : parseDecimal(_displacement.text),
     ));
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Veículo salvo.')));
@@ -190,6 +194,23 @@ class _VehicleProfileScreenState extends State<VehicleProfileScreen> {
                 decoration: const InputDecoration(labelText: 'Capacidade do tanque', suffixText: 'L', border: OutlineInputBorder()),
                 keyboardType: numberKeyboard,
                 validator: _validateTank,
+              ),
+              const SizedBox(height: 20),
+              TextFormField(
+                key: const ValueKey('vehicle_displacement'),
+                controller: _displacement,
+                decoration: const InputDecoration(
+                  labelText: 'Cilindrada (opcional)',
+                  suffixText: 'L',
+                  helperText: 'Ex.: 1,0 para um motor 1.0. Usada pelo consumo instantâneo do OBD-II.',
+                  border: OutlineInputBorder(),
+                ),
+                keyboardType: numberKeyboard,
+                validator: (text) {
+                  if (text == null || text.trim().isEmpty) return null;
+                  final value = parseDecimal(text);
+                  return value == null || value < 0.5 || value > 8 ? 'Informe entre 0,5 e 8 L' : null;
+                },
               ),
               const SizedBox(height: 20),
               Text('Consumo de referência', style: theme.textTheme.titleSmall),

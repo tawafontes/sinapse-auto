@@ -6,6 +6,7 @@ import '../../widgets/sensors/artificial_horizon.dart';
 import '../../widgets/sensors/g_force_meter.dart';
 import '../../widgets/sensors/line_chart.dart';
 import '../../widgets/sensors/mock_preview_data.dart';
+import '../../widgets/sensors/obd_panel.dart';
 import '../../widgets/sensors/obd_widgets.dart';
 import '../../widgets/vehicle/refuel_summary_widget.dart';
 
@@ -102,5 +103,7 @@ Widget buildStylePreview(SensorType sensorType, DisplayStyle style) {
       return const ObdSignalView.preview(signal: ObdSignal.rpm, unit: 'rpm', value: 2400, tachometer: true);
     case DisplayStyle.obdValue:
       return const ObdSignalView.preview(signal: ObdSignal.rpm, unit: 'rpm', value: 2400);
+    case DisplayStyle.obdPanel:
+      return ObdPanelView.preview(sensorType: sensorType);
   }
 }

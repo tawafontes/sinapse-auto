@@ -163,7 +163,7 @@ Suíte: **1616 testes passando** no Flutter 3.44.7.
   held by a native STOP…"): falhou 2 vezes em 6 rodando sozinho numa cópia limpa da `main` de
   2026-11-14 (antes de qualquer mudança da Etapa B), esperando o gatilho `settingChanged` e
   recebendo `publication`. É fragilidade de tempo do teste, não defeito do produto observado —
-  documentado aqui (CLAUDE.md §7), não corrigido.
+  documentado aqui (CLAUDE.md §7), não corrigido. Nova medição em 2026-11-14, com a máquina mais carregada: 7 falhas em 10 no commit `dee7524` (antes da câmera dupla) e 6 em 10 depois — a mesma taxa; a frequência depende da carga da máquina, não das mudanças.
 
 ## Pendências fora da dashcam
 

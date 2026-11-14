@@ -952,7 +952,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
         builder: (_) => SensorFullscreenScreen(
           label: params.label,
           icon: params.icon,
-          content: buildDashboardSensorWidget(config.sensorType, config.displayStyle, _session.streams),
+          // fullscreen: the OBD panels show more values maximized (2026-11-14).
+          content: buildDashboardSensorWidget(config.sensorType, config.displayStyle, _session.streams, fullscreen: true),
           onDelete: params.onDelete,
           onChangeStyle: params.onChangeStyle,
           onResetRecords: params.onResetRecords,

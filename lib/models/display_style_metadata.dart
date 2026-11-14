@@ -9,6 +9,7 @@ const Map<DisplayStyle, String> displayStyleLabels = {
   DisplayStyle.refuelSummary: 'Autonomia e abastecimento',
   DisplayStyle.tachometer: 'Conta-giros',
   DisplayStyle.obdValue: 'Valor ao vivo',
+  DisplayStyle.obdPanel: 'Painel',
 };
 
 /// Which [DisplayStyle]s a given [SensorType] can be rendered with, in the
@@ -24,4 +25,8 @@ const Map<SensorType, List<DisplayStyle>> validDisplayStylesForSensor = {
   SensorType.engineCoolant: [DisplayStyle.obdValue],
   SensorType.batteryVoltage: [DisplayStyle.obdValue],
   SensorType.engineLoad: [DisplayStyle.obdValue],
+  SensorType.fuelLevel: [DisplayStyle.obdPanel],
+  SensorType.engineTemperatures: [DisplayStyle.obdPanel],
+  SensorType.accelerator: [DisplayStyle.obdPanel],
+  SensorType.fuelConsumption: [DisplayStyle.obdPanel],
 };

@@ -90,20 +90,27 @@ void main() {
       expect(car.sent, isNot(contains('0160')), reason: 'not announced by 0140');
 
       await tester.pump(const Duration(seconds: 2));
-      expect(car.sent, contains('010C040D11'), reason: 'the fast group in one request');
-      expect(car.sent, contains('0105422F'), reason: 'coolant, module voltage, fuel level');
+      expect(car.sent, contains('010C040D11490B'), reason: 'the fast group in one request: rpm, load, speed, throttle, pedal, MAP (no MAF)');
+      expect(car.sent, contains('0105422F0F463C'), reason: 'coolant, module voltage, fuel level, intake, ambient, catalyst');
+      expect(car.sent, contains('0152'), reason: 'the ethanol share, on its own');
       expect(car.sent.where((c) => c.startsWith('04')), isEmpty, reason: 'never clears codes');
       expect(service.readings[ObdSignal.rpm]!.value, 982);
       expect(service.readings[ObdSignal.coolant]!.value, 81);
       expect(service.readings[ObdSignal.fuelLevel]!.value.round(), 50);
       expect(service.readings[ObdSignal.adapterVoltage]!.value, 13.3);
+      expect(service.readings[ObdSignal.manifoldPressure]!.value, 35);
+      expect(service.readings[ObdSignal.pedal]!.value.round(), 18);
+      expect(service.readings[ObdSignal.intakeTemp]!.value, 34);
+      expect(service.readings[ObdSignal.ambientTemp]!.value, 27);
+      expect(service.readings[ObdSignal.catalystTemp]!.value, 512);
+      expect(service.readings[ObdSignal.ethanol]!.value.round(), 27);
       expect(service.isFresh(ObdSignal.rpm), isTrue);
       expect(service.supports(ObdSignal.fuelLevel), isTrue);
 
       // Twice a second (owner decision).
-      final before = car.sent.where((c) => c == '010C040D11').length;
+      final before = car.sent.where((c) => c == '010C040D11490B').length;
       await tester.pump(const Duration(seconds: 10));
-      final perSecond = (car.sent.where((c) => c == '010C040D11').length - before) / 10;
+      final perSecond = (car.sent.where((c) => c == '010C040D11490B').length - before) / 10;
       expect(perSecond, inInclusiveRange(1.7, 2.1));
 
       car.rpm = 2500;

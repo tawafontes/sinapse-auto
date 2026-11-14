@@ -31,13 +31,14 @@ class VehicleProfileAdapter extends TypeAdapter<VehicleProfile> {
       electricRangeKm: fields[9] as double?,
       autoUpdateReferences: fields[10] == null ? true : fields[10] as bool,
       defaultPricePerKwh: fields[11] as double?,
+      engineDisplacementLiters: fields[12] as double?,
     );
   }
 
   @override
   void write(BinaryWriter writer, VehicleProfile obj) {
     writer
-      ..writeByte(12)
+      ..writeByte(13)
       ..writeByte(0)
       ..write(obj.nickname)
       ..writeByte(1)
@@ -61,7 +62,9 @@ class VehicleProfileAdapter extends TypeAdapter<VehicleProfile> {
       ..writeByte(10)
       ..write(obj.autoUpdateReferences)
       ..writeByte(11)
-      ..write(obj.defaultPricePerKwh);
+      ..write(obj.defaultPricePerKwh)
+      ..writeByte(12)
+      ..write(obj.engineDisplacementLiters);
   }
 
   @override

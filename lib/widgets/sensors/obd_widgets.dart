@@ -14,6 +14,11 @@ const Map<SensorType, ObdSignal> obdSignalForSensor = {
   SensorType.engineCoolant: ObdSignal.coolant,
   SensorType.batteryVoltage: ObdSignal.adapterVoltage,
   SensorType.engineLoad: ObdSignal.engineLoad,
+  // The panels, by the value that decides whether the car reports them at all.
+  SensorType.fuelLevel: ObdSignal.fuelLevel,
+  SensorType.engineTemperatures: ObdSignal.intakeTemp,
+  SensorType.accelerator: ObdSignal.throttle,
+  SensorType.fuelConsumption: ObdSignal.rpm,
 };
 
 /// What an OBD widget says instead of a value (owner decision, 2026-11-11:

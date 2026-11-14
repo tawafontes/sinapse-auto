@@ -175,3 +175,16 @@ No Nivus, todo pedido do modo 01 recebe duas respostas (`7E8` motor e `7E9`), e 
 - Endereços das ECUs, mapa de PIDs e se o multi-PID é aceito. O serviço já se adapta a cada um desses (descobre o motor, lê o mapa e cai para um PID por pedido).
 - Bateria híbrida (`5B`) como widget, se o Haval tiver esse PID.
 - Validação real em segundo plano (a conexão Bluetooth com a tela desligada e a sessão gravando).
+
+## 13. Widgets novos (14/11/2026, pedido do dono)
+
+| Widget (`SensorType`) | Mostra | Maximizado também |
+|---|---|---|
+| Nível do tanque (10) | % do tanque (`2F`) e ≈ litros, com o tanque de "Meu veículo" | % de etanol na mistura (`52`) |
+| Temperaturas (11) | admissão (`0F`), ambiente (`46`) e catalisador (`3C`) | pressão do coletor de admissão (`0B`) |
+| Acelerador (12) | acelerador (`11`) e pedal (`49`), em barras | — |
+| Consumo instantâneo (13) | km/L andando, L/h parado | a base do cálculo (MAF ou pressão do coletor) e o aviso de que é uma estimativa |
+
+- Os quatro usam o estilo `DisplayStyle.obdPanel` (12) e as mesmas regras dos outros cards OBD: valor ao vivo; o estado da conexão quando não há valor; o último valor com a **borda vermelha fixa** só quando a conexão cai (não ao desconectar à mão nem com o carro desligado).
+- **Leitura:** o grupo rápido passou a ter 6 PIDs (rotação, carga, velocidade, acelerador, pedal e pressão do coletor, ou MAF se o carro tiver); o lento, 6 (temperatura do motor, tensão, tanque, admissão, ambiente e catalisador); o etanol é lido a cada 30 s.
+- **Consumo instantâneo** (`lib/services/obd/obd_consumption.dart`): pelo MAF, ou, sem ele, por *speed-density* (pressão do coletor, temperatura de admissão, rotação e a **cilindrada**, campo 12 novo e opcional em "Meu veículo", com eficiência volumétrica de 0,85). A razão ar/combustível e a densidade seguem a % de etanol do carro (ou E27 se ele não informar). No Nivus em marcha lenta dá ~1,0 L/h. **Indicativo**: a fase 2 calibra pelo consumo real dos abastecimentos.

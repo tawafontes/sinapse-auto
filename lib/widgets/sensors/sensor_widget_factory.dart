@@ -11,6 +11,7 @@ import '../vehicle/refuel_summary_widget.dart';
 import 'artificial_horizon.dart';
 import 'g_force_meter.dart';
 import 'line_chart.dart';
+import 'obd_panel.dart';
 import 'obd_widgets.dart';
 
 /// Reads the live [UnitPreferences] from [context] (via [UnitPreferencesScope]
@@ -76,6 +77,7 @@ Widget buildDashboardSensorWidget(
   ValueChanged<Color?>? onAlertColorChanged,
   void Function(SensorType type, VoidCallback trigger)? onResetRequested,
   void Function(SensorType type, VoidCallback trigger)? onImmediateResetRequested,
+  bool fullscreen = false,
 }) {
   switch (style) {
     case DisplayStyle.numericWithHistory:
@@ -174,5 +176,8 @@ Widget buildDashboardSensorWidget(
         tachometer: style == DisplayStyle.tachometer,
         onAlertColorChanged: onAlertColorChanged,
       );
+    case DisplayStyle.obdPanel:
+      // OBD-II panels (2026-11-14): more values when maximized ([fullscreen]).
+      return ObdPanelView(sensorType: sensorType, service: streams.obd, fullscreen: fullscreen, onAlertColorChanged: onAlertColorChanged);
   }
 }

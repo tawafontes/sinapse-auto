@@ -45,6 +45,15 @@ enum SensorType {
   batteryVoltage,
   engineLoad,
 
+  /// OBD-II panels (2026-11-14), bytes 10-13: the tank level (and ethanol
+  /// share, maximized); the intake, ambient and catalyst temperatures (and
+  /// the manifold pressure, maximized); the accelerator and pedal; the
+  /// instant consumption (an estimate until phase 2 calibrates it).
+  fuelLevel,
+  engineTemperatures,
+  accelerator,
+  fuelConsumption,
+
   /// Sentinel returned by [SensorTypeAdapter.read] for a stored byte that
   /// doesn't match any case above. Never chosen by the user or written back
   /// to Hive — see [SensorWidgetRepository.discardUnknownSensors].
@@ -84,6 +93,14 @@ class SensorTypeAdapter extends TypeAdapter<SensorType> {
         return SensorType.batteryVoltage;
       case 9:
         return SensorType.engineLoad;
+      case 10:
+        return SensorType.fuelLevel;
+      case 11:
+        return SensorType.engineTemperatures;
+      case 12:
+        return SensorType.accelerator;
+      case 13:
+        return SensorType.fuelConsumption;
       default:
         return SensorType.unknown;
     }
@@ -118,6 +135,18 @@ class SensorTypeAdapter extends TypeAdapter<SensorType> {
         break;
       case SensorType.engineLoad:
         writer.writeByte(9);
+        break;
+      case SensorType.fuelLevel:
+        writer.writeByte(10);
+        break;
+      case SensorType.engineTemperatures:
+        writer.writeByte(11);
+        break;
+      case SensorType.accelerator:
+        writer.writeByte(12);
+        break;
+      case SensorType.fuelConsumption:
+        writer.writeByte(13);
         break;
       case SensorType.unknown:
         throw ArgumentError('SensorType.unknown must never be persisted');
@@ -171,6 +200,10 @@ enum DisplayStyle {
   /// A big live value with its unit (OBD-II phase 1: coolant, 12 V, load).
   @HiveField(11)
   obdValue,
+
+  /// Several OBD-II values in one card, more of them maximized (2026-11-14).
+  @HiveField(12)
+  obdPanel,
 }
 
 /// Normalized position of a widget on the dashboard grid (0.0 - 1.0 range,

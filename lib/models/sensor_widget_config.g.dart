@@ -156,6 +156,8 @@ class DisplayStyleAdapter extends TypeAdapter<DisplayStyle> {
         return DisplayStyle.tachometer;
       case 11:
         return DisplayStyle.obdValue;
+      case 12:
+        return DisplayStyle.obdPanel;
       default:
         return DisplayStyle.numericWithHistory;
     }
@@ -184,6 +186,9 @@ class DisplayStyleAdapter extends TypeAdapter<DisplayStyle> {
         break;
       case DisplayStyle.obdValue:
         writer.writeByte(11);
+        break;
+      case DisplayStyle.obdPanel:
+        writer.writeByte(12);
         break;
     }
   }

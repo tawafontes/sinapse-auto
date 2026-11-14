@@ -31,7 +31,27 @@ enum ObdLinkState {
 }
 
 /// The values the app reads from the car (and the adapter's own voltage).
-enum ObdSignal { rpm, engineLoad, speed, throttle, coolant, moduleVoltage, fuelLevel, adapterVoltage }
+enum ObdSignal {
+  rpm,
+  engineLoad,
+  speed,
+  throttle,
+  coolant,
+  moduleVoltage,
+  fuelLevel,
+  adapterVoltage,
+
+  // 2026-11-14 (owner request): the tank's ethanol share, the temperatures
+  // around the engine, the accelerator pedal, and what the instant consumption
+  // is estimated from (manifold pressure, or the MAF on a car that has one).
+  ethanol,
+  intakeTemp,
+  ambientTemp,
+  catalystTemp,
+  manifoldPressure,
+  pedal,
+  maf,
+}
 
 /// The mode 01 PID behind each [ObdSignal] (`adapterVoltage` is `ATRV`).
 const Map<ObdSignal, int> obdSignalPids = {
@@ -42,6 +62,13 @@ const Map<ObdSignal, int> obdSignalPids = {
   ObdSignal.coolant: 0x05,
   ObdSignal.moduleVoltage: 0x42,
   ObdSignal.fuelLevel: 0x2F,
+  ObdSignal.ethanol: 0x52,
+  ObdSignal.intakeTemp: 0x0F,
+  ObdSignal.ambientTemp: 0x46,
+  ObdSignal.catalystTemp: 0x3C,
+  ObdSignal.manifoldPressure: 0x0B,
+  ObdSignal.pedal: 0x49,
+  ObdSignal.maf: 0x10,
 };
 
 /// One value and when it was read.
@@ -156,9 +183,12 @@ class _Cancelled implements Exception {
 ///   Three requests in a row without a prompt (500 ms each) count as lost.
 /// * **Ignition off is not a drop:** the adapter goes on answering while the
 ///   car says `NO DATA`, so the link stays up in [ObdLinkState.waitingForCar].
-/// * Polling (owner decision): rpm and load (plus speed and throttle when the
-///   car has them) twice a second in one multi-PID request; coolant, module
-///   voltage and fuel level every 5 s; the adapter's voltage every 10 s.
+/// * Polling (owner decision): rpm and load (plus speed, throttle, pedal and
+///   the manifold pressure — or the MAF — when the car has them) twice a
+///   second in one multi-PID request, at most six PIDs, the ELM's limit on
+///   CAN; coolant, module voltage, fuel level and the intake, ambient and
+///   catalyst temperatures every 5 s; the adapter's voltage every 10 s; the
+///   ethanol share every 30 s.
 class ObdService extends ChangeNotifier {
   ObdService({required this.bridge, required this.preferences, DateTime Function()? now})
       : _now = now ?? DateTime.now,
@@ -176,6 +206,7 @@ class ObdService extends ChangeNotifier {
   static const fastPeriod = Duration(milliseconds: 500);
   static const slowPeriod = Duration(seconds: 5);
   static const voltagePeriod = Duration(seconds: 10);
+  static const verySlowPeriod = Duration(seconds: 30);
   static const waitingPeriod = Duration(seconds: 3);
   static const requestTimeout = Duration(milliseconds: 500);
 
@@ -190,13 +221,38 @@ class ObdService extends ChangeNotifier {
   /// How old a value may be and still count as live: twice its polling period
   /// plus slack.
   static Duration maxAge(ObdSignal signal) => switch (signal) {
-        ObdSignal.rpm || ObdSignal.engineLoad || ObdSignal.speed || ObdSignal.throttle => const Duration(seconds: 3),
-        ObdSignal.coolant || ObdSignal.moduleVoltage || ObdSignal.fuelLevel => const Duration(seconds: 15),
+        ObdSignal.rpm ||
+        ObdSignal.engineLoad ||
+        ObdSignal.speed ||
+        ObdSignal.throttle ||
+        ObdSignal.pedal ||
+        ObdSignal.manifoldPressure ||
+        ObdSignal.maf =>
+          const Duration(seconds: 3),
+        ObdSignal.coolant ||
+        ObdSignal.moduleVoltage ||
+        ObdSignal.fuelLevel ||
+        ObdSignal.intakeTemp ||
+        ObdSignal.ambientTemp ||
+        ObdSignal.catalystTemp =>
+          const Duration(seconds: 15),
         ObdSignal.adapterVoltage => const Duration(seconds: 30),
+        ObdSignal.ethanol => const Duration(seconds: 90),
       };
 
-  static const _fastSignals = [ObdSignal.rpm, ObdSignal.engineLoad, ObdSignal.speed, ObdSignal.throttle];
-  static const _slowSignals = [ObdSignal.coolant, ObdSignal.moduleVoltage, ObdSignal.fuelLevel];
+  /// The fast group: what the dashboard moves with, and what the instant
+  /// consumption needs — the MAF when the car has one, else the manifold
+  /// pressure (speed-density). Six at most.
+  static const _fastSignals = [ObdSignal.rpm, ObdSignal.engineLoad, ObdSignal.speed, ObdSignal.throttle, ObdSignal.pedal];
+  static const _slowSignals = [
+    ObdSignal.coolant,
+    ObdSignal.moduleVoltage,
+    ObdSignal.fuelLevel,
+    ObdSignal.intakeTemp,
+    ObdSignal.ambientTemp,
+    ObdSignal.catalystTemp,
+  ];
+  static const _verySlowSignals = [ObdSignal.ethanol];
 
   late ObdLinkState _state;
   String? _detail;
@@ -505,9 +561,12 @@ class ObdService extends ChangeNotifier {
           for (final s in signals)
             if (supported.contains(obdSignalPids[s])) s,
         ];
-    final fast = available(_fastSignals);
+    final airflow = supported.contains(obdSignalPids[ObdSignal.maf]) ? ObdSignal.maf : ObdSignal.manifoldPressure;
+    final fast = available([..._fastSignals, airflow]);
     final slow = available(_slowSignals);
-    var sinceSlow = slowPeriod; // read the slow group right away
+    final verySlow = available(_verySlowSignals);
+    var sinceSlow = slowPeriod; // read the slow groups right away
+    var sinceVerySlow = verySlowPeriod;
     var sinceVoltage = Duration.zero;
     var noData = 0;
     while (true) {
@@ -522,6 +581,10 @@ class ObdService extends ChangeNotifier {
         sinceSlow = Duration.zero;
         await _read(slow, generation);
       }
+      if (sinceVerySlow >= verySlowPeriod) {
+        sinceVerySlow = Duration.zero;
+        await _read(verySlow, generation);
+      }
       if (sinceVoltage >= voltagePeriod) {
         sinceVoltage = Duration.zero;
         await _readAdapterVoltage(generation);
@@ -530,6 +593,7 @@ class ObdService extends ChangeNotifier {
       await _sleep(fastPeriod - elapsed, generation);
       final tick = elapsed > fastPeriod ? elapsed : fastPeriod;
       sinceSlow += tick;
+      sinceVerySlow += tick;
       sinceVoltage += tick;
     }
   }

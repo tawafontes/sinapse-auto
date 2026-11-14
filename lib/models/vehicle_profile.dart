@@ -87,10 +87,10 @@ const Map<VehicleFuelSystem, String> vehicleFuelSystemLabels = {
 /// user's measured km/L against what the car should do. One profile only; it
 /// lives under a fixed key (see `VehicleRepository`).
 ///
-/// Engine displacement is deliberately absent: it is only needed for a
-/// speed-density fuel estimate on a car without a MAF sensor, which the OBD-II
-/// phase 0 has not measured yet. Add it then, nullable, as field 12 (fields
-/// 7–11 were taken by the hybrid strategy, 2026-11-12).
+/// Engine displacement ([engineDisplacementLiters], field 12, optional) came
+/// with the OBD-II instant consumption (2026-11-14): the Nivus' engine has no
+/// MAF sensor, so the fuel flow is estimated from the manifold pressure
+/// (speed-density), which needs the displacement.
 ///
 /// typeId: 18
 @HiveType(typeId: 18)
@@ -108,6 +108,7 @@ class VehicleProfile extends HiveObject {
     this.electricRangeKm,
     this.autoUpdateReferences = true,
     this.defaultPricePerKwh,
+    this.engineDisplacementLiters,
   });
 
   /// Optional name shown in the app ("Meu carro" when absent).
@@ -165,6 +166,12 @@ class VehicleProfile extends HiveObject {
   /// recharge (a public charger) does not change it.
   @HiveField(11)
   double? defaultPricePerKwh;
+
+  /// Engine displacement in litres (1.0 for the Nivus' 999 cc), optional —
+  /// only the OBD-II instant consumption of a car without a MAF sensor needs
+  /// it (speed-density estimate). `null` for every profile stored before it.
+  @HiveField(12)
+  double? engineDisplacementLiters;
 
   bool get isPlugIn => propulsion == VehiclePropulsion.plugInHybrid;
 

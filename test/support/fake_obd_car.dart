@@ -77,6 +77,15 @@ class FakeObdCar implements ObdBridge {
   double throttlePercent = 16;
   double coolantC = 81;
   double fuelPercent = 50;
+  double ethanolPercent = 27;
+  double intakeC = 34;
+  double ambientC = 27;
+  double catalystC = 512;
+  double pedalPercent = 18;
+
+  /// The intake manifold pressure: about atmospheric with the engine stopped,
+  /// ~35 kPa idling (vacuum).
+  double get manifoldKpa => ignition == FakeIgnition.running ? 35 : 100;
 
   /// When false, a multi-PID request gets only its first PID answered (some
   /// cars do this), so the service has to fall back to one PID per request.
@@ -242,6 +251,15 @@ class FakeObdCar implements ObdBridge {
       0x0D => [speedKmh.round().clamp(0, 255)],
       0x05 => [(coolantC + 40).round().clamp(0, 255)],
       0x2F => [pct(fuelPercent)],
+      0x52 => [pct(ethanolPercent)],
+      0x49 => [pct(pedalPercent)],
+      0x0B => [manifoldKpa.round()],
+      0x0F => [(intakeC + 40).round()],
+      0x46 => [(ambientC + 40).round()],
+      0x3C => () {
+          final raw = ((catalystC + 40) * 10).round();
+          return [raw >> 8, raw & 0xFF];
+        }(),
       0x42 => () {
           final mv = (batteryVolts * 1000 + 360).round();
           return [mv >> 8, mv & 0xFF];
