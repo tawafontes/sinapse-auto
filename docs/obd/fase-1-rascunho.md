@@ -35,7 +35,8 @@ DashboardSensorStreams.snapshot  (TelemetrySnapshot ganha campos opcionais de ve
 | `reconnecting(n)` | o socket caiu (`closed`) ou houve N timeouts seguidos | vermelho / piscando | **último valor com a borda em vermelho** (decisão do dono, seção 11) |
 
 - **Backoff:** 5 s → 15 s → 30 s → 60 s (fica em 60 s). Zera ao chegar em `receiving`.
-- **Em `waitingForCar`:** repetir `0100` a cada X s, sem derrubar o socket. **[Haval]** Ainda não se sabe se o adaptador mantém o link com a ignição desligada nem quanto tempo leva para acordar; isso define o X e decide se `waitingForCar` mantém o socket aberto ou se reconecta.
+- **Em `waitingForCar`:** repetir `0100` a cada ~3 s, **sem derrubar o socket**. No Nivus (rodada 2), o adaptador e o link Bluetooth ficaram de pé por mais de 4 min com o carro desligado, e as ECUs voltaram a responder menos de 2 s depois de ligar a ignição. **[Haval]** Confirmar o mesmo comportamento.
+- **`receiving` ≠ motor ligado:** com só a ignição, as ECUs já respondem. O estado continua `receiving`, e é a rotação (0 rpm) que diz que o motor está parado. O início automático de sessão (seção 7) não deve disparar só com a ignição ligada. **[Haval]** Definir o gatilho com os dados do PHEV, onde a rotação 0 é normal andando no modo EV.
 - **Ciclo de vida:** `AppLifecycleState.paused`, sem sessão gravando → solta o link (`disconnect`). Com sessão gravando, o link continua. `resumed` → `connecting`, se a conexão automática estiver ligada.
 - Toda transição passa por um único método (`_transition`), registrada num histórico curto que aparece na tela do adaptador.
 
@@ -43,10 +44,13 @@ DashboardSensorStreams.snapshot  (TelemetrySnapshot ganha campos opcionais de ve
 
 Ordem baseada na fase 0. No Nivus, todos os comandos responderam em menos de 50 ms, exceto `ATZ` (~1 s):
 
+**A sequência inteira roda a cada conexão e a cada reconexão.** No Nivus, o adaptador que perdeu a energia voltou com os padrões de fábrica: eco, espaços e endereçamento funcional.
+
 1. `connect`: começar pelo método salvo (no Nivus, `secure`). Se falhar, cair para as outras duas formas e salvar a que funcionou.
-2. `ATZ` (timeout de 2 s) → `ATE0 ATL0 ATS0 ATH0` → `ATSP0` → `ATRV`.
-3. `0100`: se responder → `receiving`; se der `NO DATA`/`UNABLE` → `waitingForCar`.
-4. No primeiro `receiving` com este adaptador e este carro: ler a cadeia de bitmaps (`0100`, `0120`, `0140`, …) e salvar o **mapa de PIDs suportados** e o protocolo (`ATDPN`). Isso alimenta o "+" e o "Seu carro não informa este dado".
+2. `ATZ` (timeout de 2 s) → `ATE0 ATL0 ATS0 ATH0` → `ATSP0` → `ATRV` (timeout de ≥ 1 s: com o carro desligado ele leva até ~500 ms).
+3. `0100` no endereço funcional: se responder → descobrir o motor; se der `NO DATA`/`UNABLE` → `waitingForCar`.
+4. **Descobrir o motor:** `ATH1` + `0100`, guardar o CAN id que respondeu com o maior bitmap (no Nivus, `7E8`), depois `ATSH` no endereço físico correspondente (`7E0`) e `ATH0`. Se o carro não aceitar o endereçamento físico, ficar no funcional e filtrar por `ATH1`.
+5. No primeiro `receiving` com este adaptador e este carro: ler a cadeia de bitmaps (`0100`, `0120`, `0140`, …) **já endereçada ao motor** e salvar o **mapa de PIDs suportados** e o protocolo (`ATDPN`). Isso alimenta o "+" e o "Seu carro não informa este dado". No Nivus, sem o endereçamento, a primeira resposta veio da ECU errada, e o mapa saiu com 12 PIDs em vez de 23.
 
 ## 4. Polling
 
@@ -61,16 +65,12 @@ Plano inicial (o Nivus mostrou ~65 ms por pedido, com 1 ou 6 PIDs):
 - O snapshot já é limitado a ~5 Hz na cadência do GPS (`snapshotGpsCadenceGap`), então 2 Hz no rápido fica bem abaixo desse limite e deixa folga no adaptador e na bateria.
 - **Multi-PID** só com PIDs que o mapa marca como suportados, no máximo 6 por pedido. Se o carro recusar o multi-PID, a resposta não traz todos os PIDs pedidos; nesse caso, cair para um PID por pedido e salvar essa limitação.
 - **Fila:** os comandos são serializados no Dart (um pedido em voo por vez), e os pedidos do usuário (tela de diagnóstico) passam na frente do polling.
-- **Timeout por pedido:** 500 ms; o p99 no Nivus foi 171 ms. Três timeouts seguidos → `reconnecting`.
+- **Timeout por pedido:** 500 ms; o p99 no Nivus foi 171 ms. **Três timeouts seguidos → `reconnecting`.** É essa a detecção principal de queda: no Nivus, com o adaptador puxado, o socket só acusou `Broken pipe` 6 s depois; antes disso, os pedidos simplesmente ficaram sem resposta. Com 3 × 500 ms, a queda aparece em ~1,5 s.
 - **[Haval]** Ajustar os períodos pela latência real. Se o carro tiver o PID `5B` (bateria híbrida), ele entra no grupo lento.
 
-### Pendência P1: duas ECUs respondem
+### P1: duas ECUs respondem — resolvido
 
-No Nivus, todo pedido do modo 01 recebe duas respostas, que com `ATH0` não se distinguem. Opções:
-- **(a)** `ATSH7E0`: endereçar só o motor (pedido físico). Isso também **reduz pela metade o tráfego** no barramento e na serial.
-- **(b)** `ATH1`: receber o cabeçalho e filtrar `7E8` (motor).
-
-Proposta: começar pela (a), com a (b) como diagnóstico. **[Haval]** Para decidir com dados, sugiro acrescentar à ferramenta da fase 0 um passo de **`ATH1` + `0100` + `010C`**, só leitura, antes da rodada no Haval. Isso mostra quais ECUs respondem e a qual endereço cada uma pertence.
+No Nivus, todo pedido do modo 01 recebe duas respostas (`7E8` motor e `7E9`), e a ordem muda entre rodadas. Com **`ATSH7E0`** só o motor respondeu (rodada 2). Decisão do dono: endereçar só o motor, o que também **reduz pela metade o tráfego** no barramento e na serial. Como o motor é descoberto, ver a seção 3, passo 4. **[Haval]** Confirmar os endereços.
 
 ## 5. Ponte nativa
 
@@ -119,8 +119,9 @@ Proposta: começar pela (a), com a (b) como diagnóstico. **[Haval]** Para decid
 
 - `FakeObdBridge` que reproduz **as transcrições reais** (Nivus; depois o Haval), com cenários:
   1. adaptador desligado (`connect_failed`);
-  2. ignição desligada (`NO DATA`/`UNABLE`) → `waitingForCar` → ignição ligada → `receiving`;
-  3. queda no meio da viagem (`closed`) → backoff 5/15/30/60 → volta;
+  2. ignição desligada (`NO DATA`/`UNABLE`) → `waitingForCar` → ignição ligada → `receiving` (o roteiro da rodada 2 do Nivus);
+  3. queda no meio da viagem, como no Nivus: pedidos sem resposta → `reconnecting` em ~1,5 s → backoff 5/15/30/60 → o adaptador volta **com os padrões de fábrica** (eco/espaços) → a inicialização completa roda de novo → `receiving`;
+  3b. duas ECUs respondendo em ordem variável: o mapa de PIDs e os valores vêm só do motor;
   4. timeouts em série;
   5. carro que recusa o multi-PID;
   6. PIDs não suportados → "Seu carro não informa este dado";
