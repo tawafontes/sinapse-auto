@@ -11,7 +11,8 @@ import 'package:flutter/services.dart';
 /// on that private file, which the app alone owns (an external app or the user
 /// deleting a gallery file can never break them). The gallery copy is the
 /// user's: the quota never counts or deletes it, and deleting a session in the
-/// app does not remove it.
+/// app does not remove it. Deleting videos in "Gravações" asks the user
+/// whether to remove their gallery copies too ([deleteVideos], 2026-11-14).
 ///
 /// Production: [MethodChannelDashcamGalleryExporter], backed by
 /// `MainActivity.kt` (Android only). Tests: a fake, or nothing — on a platform
@@ -26,7 +27,17 @@ abstract interface class DashcamGalleryExporter {
   /// 10) has not granted storage access, and anything else for other failures;
   /// on failure no partial entry is left in the gallery.
   Future<void> saveVideo({required String path, required String displayName, required DateTime recordedAt});
+
+  /// Removes the gallery copies named [displayNames] (see
+  /// [dashcamGalleryDisplayName]) from the app's album — only there. Android
+  /// may ask the user to confirm, once for all of them, for copies the app no
+  /// longer owns (made before a reinstall); those the user refuses are
+  /// [GalleryDeletion.denied].
+  Future<GalleryDeletion> deleteVideos(List<String> displayNames);
 }
+
+/// What [DashcamGalleryExporter.deleteVideos] did.
+typedef GalleryDeletion = ({int deleted, int notFound, int denied});
 
 /// Android before 10 needs the storage permission to write into the shared
 /// Movies folder, and it has not been granted.
@@ -76,5 +87,13 @@ class MethodChannelDashcamGalleryExporter implements DashcamGalleryExporter {
       if (error.code == 'storage_permission') throw const DashcamGalleryPermissionDenied();
       rethrow;
     }
+  }
+
+  @override
+  Future<GalleryDeletion> deleteVideos(List<String> displayNames) async {
+    if (displayNames.isEmpty) return (deleted: 0, notFound: 0, denied: 0);
+    final m = await _channel.invokeMethod<Map<Object?, Object?>>('deleteVideos', {'displayNames': displayNames}) ?? const {};
+    int n(String key) => (m[key] as num?)?.toInt() ?? 0;
+    return (deleted: n('deleted'), notFound: n('notFound'), denied: n('denied'));
   }
 }

@@ -1,7 +1,12 @@
 package com.synapseauto.synapse_auto
 
 import android.Manifest
+import android.app.Activity
+import android.app.RecoverableSecurityException
+import android.content.ContentUris
 import android.content.ContentValues
+import android.content.Intent
+import android.net.Uri
 import android.content.pm.PackageManager
 import android.media.MediaScannerConnection
 import android.os.Build
@@ -75,6 +80,10 @@ class MainActivity : FlutterActivity() {
                     } else {
                         saveVideoInBackground(path, displayName, recordedAtMs, result)
                     }
+                }
+                "deleteVideos" -> {
+                    val names = call.argument<List<String>>("displayNames")
+                    if (names == null) result.error("bad_args", "deleteVideos: no displayNames", null) else deleteVideosInBackground(names, result)
                 }
                 else -> result.notImplemented()
             }
@@ -171,6 +180,144 @@ class MainActivity : FlutterActivity() {
     }
 
     /**
+     * Deletes the gallery copies of clips the user deleted in the app (owner
+     * decision, 2026-11-14: deleting a video asks whether to remove the gallery
+     * copy too). Only entries of this app's album (`Movies/Synapse Auto`) with
+     * exactly the given display names are touched. Answers
+     * `{deleted, notFound, denied}`.
+     *
+     * Android 10+: the app may delete the MediaStore entries it inserted; one it
+     * no longer owns (inserted before a reinstall) needs the user's consent —
+     * on Android 11+ one system dialog for all of them
+     * ([MediaStore.createDeleteRequest]); on 10, the consent of the first one.
+     * Before 10: plain files in the public Movies folder.
+     */
+    private fun deleteVideosInBackground(names: List<String>, result: MethodChannel.Result) {
+        try {
+            galleryExecutor.execute {
+                try {
+                    val (counts, needConsent) = deleteVideosFromGallery(names)
+                    mainHandler.post {
+                        if (needConsent.isEmpty()) result.success(counts) else askDeleteConsent(needConsent, counts, result)
+                    }
+                } catch (error: Exception) {
+                    mainHandler.post { result.error("delete_failed", "${error.javaClass.simpleName}: ${error.message}", null) }
+                }
+            }
+        } catch (error: RejectedExecutionException) {
+            result.error("delete_failed", "activity is being destroyed", null)
+        }
+    }
+
+    /** The counts so far and the entries that still need the user's consent. */
+    private fun deleteVideosFromGallery(names: List<String>): Pair<Map<String, Int>, List<Uri>> {
+        var deleted = 0
+        var notFound = 0
+        val needConsent = mutableListOf<Uri>()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val resolver = applicationContext.contentResolver
+            val collection = MediaStore.Video.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+            val album = "${Environment.DIRECTORY_MOVIES}/$GALLERY_ALBUM/"
+            for (name in names) {
+                val uris = mutableListOf<Uri>()
+                resolver.query(
+                    collection,
+                    arrayOf(MediaStore.MediaColumns._ID),
+                    "${MediaStore.MediaColumns.RELATIVE_PATH} = ? AND ${MediaStore.MediaColumns.DISPLAY_NAME} = ?",
+                    arrayOf(album, name),
+                    null,
+                )?.use { cursor ->
+                    while (cursor.moveToNext()) uris += ContentUris.withAppendedId(collection, cursor.getLong(0))
+                }
+                if (uris.isEmpty()) {
+                    notFound++
+                    continue
+                }
+                for (uri in uris) {
+                    try {
+                        if (resolver.delete(uri, null, null) > 0) deleted++ else notFound++
+                    } catch (error: SecurityException) {
+                        needConsent += uri
+                    }
+                }
+            }
+        } else {
+            @Suppress("DEPRECATION")
+            val album = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES), GALLERY_ALBUM)
+            for (name in names) {
+                val file = File(album, name)
+                if (file.isFile && file.delete()) {
+                    deleted++
+                    MediaScannerConnection.scanFile(applicationContext, arrayOf(file.path), null, null)
+                } else {
+                    notFound++
+                }
+            }
+        }
+        return Pair(mapOf("deleted" to deleted, "notFound" to notFound, "denied" to 0), needConsent)
+    }
+
+    private var pendingDelete: Triple<List<Uri>, Map<String, Int>, MethodChannel.Result>? = null
+
+    private fun askDeleteConsent(uris: List<Uri>, counts: Map<String, Int>, result: MethodChannel.Result) {
+        if (pendingDelete != null) {
+            result.success(counts + ("denied" to uris.size))
+            return
+        }
+        try {
+            val sender = when {
+                Build.VERSION.SDK_INT >= Build.VERSION_CODES.R ->
+                    MediaStore.createDeleteRequest(applicationContext.contentResolver, uris).intentSender
+                Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q -> try {
+                    // Android 10 grants one entry per consent: ask for the first.
+                    applicationContext.contentResolver.delete(uris.first(), null, null)
+                    null
+                } catch (error: RecoverableSecurityException) {
+                    error.userAction.actionIntent.intentSender
+                }
+                else -> null
+            }
+            if (sender == null) {
+                result.success(counts + ("denied" to uris.size))
+                return
+            }
+            pendingDelete = Triple(uris, counts, result)
+            startIntentSenderForResult(sender, DELETE_CONSENT_REQUEST, null, 0, 0, 0)
+        } catch (error: Exception) {
+            pendingDelete = null
+            result.success(counts + ("denied" to uris.size))
+        }
+    }
+
+    @Deprecated("FlutterActivity still routes results here")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        if (requestCode != DELETE_CONSENT_REQUEST) {
+            @Suppress("DEPRECATION")
+            super.onActivityResult(requestCode, resultCode, data)
+            return
+        }
+        val pending = pendingDelete ?: return
+        pendingDelete = null
+        val (uris, counts, result) = pending
+        val granted = resultCode == Activity.RESULT_OK
+        if (granted && Build.VERSION.SDK_INT == Build.VERSION_CODES.Q) {
+            // The consent of Android 10 covers only that entry: delete it now.
+            try {
+                applicationContext.contentResolver.delete(uris.first(), null, null)
+            } catch (error: SecurityException) {
+            }
+        }
+        val byConsent = if (!granted) 0 else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) uris.size else 1
+        result.success(
+            mapOf(
+                "deleted" to (counts["deleted"] ?: 0) + byConsent,
+                "notFound" to (counts["notFound"] ?: 0),
+                "denied" to uris.size - byConsent,
+            ),
+        )
+    }
+
+    /**
      * P3-HW-1 (R4.4-R1-HW, D0 §2/§4): the plugin records into the setgid cache/
      * directory, so the recording's inode has the app's CACHE group, and the
      * rename that publishes it as a canonical clip keeps the inode — Android then
@@ -260,6 +407,7 @@ class MainActivity : FlutterActivity() {
         const val STORAGE_CHANNEL = "com.synapseauto.synapse_auto/dashcam_storage"
         const val GALLERY_CHANNEL = "com.synapseauto.synapse_auto/dashcam_gallery"
         const val GALLERY_ALBUM = "Synapse Auto"
+        const val DELETE_CONSENT_REQUEST = 0x5A1
         const val COPY_BUFFER_BYTES = 1 shl 20
     }
 }

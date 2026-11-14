@@ -10,6 +10,7 @@ import 'package:synapse_auto/models/dashcam_config.dart';
 import 'package:synapse_auto/models/driving_session.dart';
 import 'package:synapse_auto/screens/sessions/dashcam_playback_screen.dart';
 import 'package:synapse_auto/screens/sessions/dashcam_recordings_screen.dart';
+import 'package:synapse_auto/services/dashcam_gallery_exporter.dart';
 import 'package:synapse_auto/services/hive_boxes.dart';
 
 DashcamClipRecord _clip(DateTime at, {bool protected = false}) => DashcamClipRecord(
@@ -124,4 +125,122 @@ void main() {
     expect(find.text('08:10:00'), findsNothing);
     expect(find.text('08:00:00'), findsOneWidget);
   });
+
+  group('with a gallery (owner decisions, 2026-11-14)', () {
+    late _FakeGallery gallery;
+    late List<File> files;
+
+    Future<void> seed(WidgetTester tester, int count) async {
+      await tester.runAsync(() async {
+        Hive.registerAdapter(DrivingSessionAdapter(), override: true);
+        await Hive.openBox<DrivingSession>(HiveBoxNames.drivingSessions);
+        await Hive.box<DrivingSession>(HiveBoxNames.drivingSessions).put('A', DrivingSession(id: 'A', startTime: DateTime(2026, 11, 11, 7), endTime: DateTime(2026, 11, 11, 9)));
+        files = [for (var i = 0; i < count; i++) await File('${dir.path}/dashcam_clips/c$i.mp4').create(recursive: true)];
+        await Hive.box(HiveBoxNames.dashcamSessionVideos).put('A', [
+          for (var i = 0; i < count; i++)
+            DashcamClipRecord(filePath: files[i].path, recordedAt: DateTime(2026, 11, 11, 8, i, 0), durationSeconds: 60, sizeBytes: 1024 * 1024),
+        ]);
+      });
+      gallery = _FakeGallery();
+      await tester.pumpWidget(MaterialApp(home: DashcamRecordingsScreen(galleryExporter: gallery)));
+    }
+
+    Future<void> runInRealZone(WidgetTester tester, VoidCallback action) async {
+      await tester.runAsync(() async {
+        action(); // a block: an arrow would wait for the dialog's answer
+      });
+      await tester.pumpAndSettle();
+    }
+
+    Future<void> waitFor(WidgetTester tester, Finder finder) async {
+      for (var i = 0; i < 400 && finder.evaluate().isEmpty; i++) {
+        await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 5)));
+        await tester.pump();
+      }
+      expect(finder, findsOneWidget);
+    }
+
+    VoidCallback deleteButtonOf(WidgetTester tester, String time) => tester
+        .widget<IconButton>(find.descendant(of: find.widgetWithText(ListTile, time), matching: find.widgetWithIcon(IconButton, Icons.delete_outline)))
+        .onPressed!;
+
+    testWidgets('deleting one video asks whether its gallery copy goes too', (tester) async {
+      await seed(tester, 2);
+      await runInRealZone(tester, deleteButtonOf(tester, '08:01:00'));
+      expect(find.text('Excluir este vídeo?'), findsOneWidget);
+      expect(find.textContaining('Apagar também a cópia na galeria'), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('recordingsDelete_confirm')));
+      await waitFor(tester, find.textContaining('Galeria: 1 cópia apagada.'));
+      expect(gallery.deleted, ['SynapseAuto_20261111_080100.mp4']);
+      expect(files[1].existsSync(), isFalse);
+      expect(files[0].existsSync(), isTrue);
+    });
+
+    testWidgets('"Só do app" leaves the gallery alone', (tester) async {
+      await seed(tester, 1);
+      await runInRealZone(tester, deleteButtonOf(tester, '08:00:00'));
+      await tester.tap(find.byKey(const ValueKey('recordingsDelete_appOnly')));
+      await waitFor(tester, find.text('Vídeo excluído.'));
+      expect(gallery.deleted, isEmpty);
+      expect(files[0].existsSync(), isFalse);
+    });
+
+    testWidgets('several at once: long press, select all, delete the selection', (tester) async {
+      await seed(tester, 3);
+      await tester.longPress(find.text('08:02:00'));
+      await tester.pump();
+      expect(find.text('1 selecionado'), findsOneWidget);
+      await tester.tap(find.text('08:00:00'));
+      await tester.pump();
+      expect(find.text('2 selecionados'), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('recordings_selectAll')));
+      await tester.pump();
+      expect(find.text('3 selecionados'), findsOneWidget);
+      await tester.tap(find.text('08:01:00'));
+      await tester.pump();
+      expect(find.text('2 selecionados'), findsOneWidget, reason: 'a tap unselects');
+
+      await runInRealZone(tester, tester.widget<IconButton>(find.byKey(const ValueKey('recordings_deleteSelected'))).onPressed!);
+      expect(find.text('Excluir 2 vídeos?'), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('recordingsDelete_confirm')));
+      await waitFor(tester, find.textContaining('2 vídeos excluídos.'));
+      expect([for (final f in files) f.existsSync()], [false, true, false]);
+      expect(gallery.deleted, hasLength(2));
+      expect(find.text('Gravações'), findsOneWidget, reason: 'the selection ends');
+    });
+
+    testWidgets('"Excluir todos" in the menu', (tester) async {
+      await seed(tester, 3);
+      // The menu offers it…
+      await tester.tap(find.byKey(const ValueKey('recordings_menu')));
+      await tester.pumpAndSettle();
+      expect(find.text('Excluir todos'), findsOneWidget);
+      await tester.tapAt(Offset.zero); // close the menu
+      await tester.pumpAndSettle();
+      // …and its choice runs in the real zone, where the deletion's I/O progresses.
+      final menu = tester.widget<PopupMenuButton<String>>(find.byKey(const ValueKey('recordings_menu')));
+      await runInRealZone(tester, () => menu.onSelected!('deleteAll'));
+      expect(find.text('Excluir 3 vídeos?'), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('recordingsDelete_appOnly')));
+      await waitFor(tester, find.textContaining('3 vídeos excluídos.'));
+      expect(files.every((f) => !f.existsSync()), isTrue);
+      expect(find.textContaining('Nenhuma gravação ainda.'), findsOneWidget);
+    });
+  });
+}
+
+class _FakeGallery implements DashcamGalleryExporter {
+  final deleted = <String>[];
+
+  @override
+  bool get isSupported => true;
+
+  @override
+  Future<void> saveVideo({required String path, required String displayName, required DateTime recordedAt}) async {}
+
+  @override
+  Future<GalleryDeletion> deleteVideos(List<String> displayNames) async {
+    deleted.addAll(displayNames);
+    return (deleted: displayNames.length, notFound: 0, denied: 0);
+  }
 }

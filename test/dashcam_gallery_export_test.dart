@@ -39,6 +39,9 @@ class _SavedVideo {
 }
 
 class _FakeGalleryExporter implements DashcamGalleryExporter {
+  @override
+  Future<GalleryDeletion> deleteVideos(List<String> displayNames) async => (deleted: displayNames.length, notFound: 0, denied: 0);
+
   _FakeGalleryExporter({this.isSupported = true});
 
   @override
