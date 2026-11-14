@@ -1,14 +1,17 @@
 import 'package:flutter/material.dart';
 
+import '../../models/sensor_type_metadata.dart';
 import '../../models/sensor_widget_config.dart';
 import '../../models/unit_system.dart';
 import '../../services/dashboard_sensor_streams.dart';
+import '../../services/obd/obd_service.dart' show ObdSignal;
 import '../../services/sensor_records.dart';
 import '../../services/unit_preferences.dart';
 import '../vehicle/refuel_summary_widget.dart';
 import 'artificial_horizon.dart';
 import 'g_force_meter.dart';
 import 'line_chart.dart';
+import 'obd_widgets.dart';
 
 /// Reads the live [UnitPreferences] from [context] (via [UnitPreferencesScope]
 /// — the same `InheritedNotifier` reactivity [ThemeControllerScope] already
@@ -159,5 +162,17 @@ Widget buildDashboardSensorWidget(
       // from Hive (see RefuelSummaryWidget). Nothing to reset or calibrate, so
       // it registers no reset trigger.
       return const RefuelSummaryWidget();
+    case DisplayStyle.tachometer:
+    case DisplayStyle.obdValue:
+      // OBD-II (phase 1): the live value, the link's state when there is
+      // none, and after a drop the last value with a red border — through
+      // onAlertColorChanged, like the artificial horizon. Nothing to reset.
+      return ObdSignalView(
+        signal: obdSignalForSensor[sensorType] ?? ObdSignal.rpm,
+        service: streams.obd,
+        unit: sensorTypeMetadata[sensorType]?.unit ?? '',
+        tachometer: style == DisplayStyle.tachometer,
+        onAlertColorChanged: onAlertColorChanged,
+      );
   }
 }

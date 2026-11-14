@@ -20,4 +20,8 @@ const Map<SensorType, SensorTypeMetadata> sensorTypeMetadata = {
   SensorType.altitude: SensorTypeMetadata(label: 'Altitude', icon: Icons.terrain, unit: 'm'),
   SensorType.gForce: SensorTypeMetadata(label: 'Aceleração G', icon: Icons.bolt, unit: 'g'),
   SensorType.refuel: SensorTypeMetadata(label: 'Abastecimento', icon: Icons.local_gas_station, unit: 'km'),
+  SensorType.engineRpm: SensorTypeMetadata(label: 'Rotação', icon: Icons.av_timer, unit: 'rpm'),
+  SensorType.engineCoolant: SensorTypeMetadata(label: 'Temperatura do motor', icon: Icons.thermostat, unit: '°C'),
+  SensorType.batteryVoltage: SensorTypeMetadata(label: 'Bateria', icon: Icons.battery_charging_full, unit: 'V'),
+  SensorType.engineLoad: SensorTypeMetadata(label: 'Carga do motor', icon: Icons.speed, unit: '%'),
 };

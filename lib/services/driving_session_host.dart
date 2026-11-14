@@ -299,6 +299,10 @@ class DrivingSessionScope extends InheritedWidget {
     return scope!.host;
   }
 
+  /// The host, or `null` above/without a scope (a screen tested on its own).
+  static DrivingSessionHost? maybeOf(BuildContext context) =>
+      context.dependOnInheritedWidgetOfExactType<DrivingSessionScope>()?.host;
+
   @override
   bool updateShouldNotify(DrivingSessionScope oldWidget) => !identical(host, oldWidget.host);
 }

@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
 
 import '../../models/sensor_widget_config.dart';
+import '../../services/obd/obd_service.dart' show ObdSignal;
 import '../../widgets/sensors/artificial_horizon.dart';
 import '../../widgets/sensors/g_force_meter.dart';
 import '../../widgets/sensors/line_chart.dart';
 import '../../widgets/sensors/mock_preview_data.dart';
+import '../../widgets/sensors/obd_widgets.dart';
 import '../../widgets/vehicle/refuel_summary_widget.dart';
 
 /// A single selectable style option: a live mock preview over a label,
@@ -96,5 +98,9 @@ Widget buildStylePreview(SensorType sensorType, DisplayStyle style) {
       // Unreachable via the UI, like the cases above: the refuel widget has
       // only this style.
       return RefuelSummaryView.preview();
+    case DisplayStyle.tachometer:
+      return const ObdSignalView.preview(signal: ObdSignal.rpm, unit: 'rpm', value: 2400, tachometer: true);
+    case DisplayStyle.obdValue:
+      return const ObdSignalView.preview(signal: ObdSignal.rpm, unit: 'rpm', value: 2400);
   }
 }

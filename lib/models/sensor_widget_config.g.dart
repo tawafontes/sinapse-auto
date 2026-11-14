@@ -152,6 +152,10 @@ class DisplayStyleAdapter extends TypeAdapter<DisplayStyle> {
         return DisplayStyle.artificialHorizon;
       case 9:
         return DisplayStyle.refuelSummary;
+      case 10:
+        return DisplayStyle.tachometer;
+      case 11:
+        return DisplayStyle.obdValue;
       default:
         return DisplayStyle.numericWithHistory;
     }
@@ -174,6 +178,12 @@ class DisplayStyleAdapter extends TypeAdapter<DisplayStyle> {
         break;
       case DisplayStyle.refuelSummary:
         writer.writeByte(9);
+        break;
+      case DisplayStyle.tachometer:
+        writer.writeByte(10);
+        break;
+      case DisplayStyle.obdValue:
+        writer.writeByte(11);
         break;
     }
   }

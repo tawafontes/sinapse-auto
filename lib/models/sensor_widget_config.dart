@@ -37,6 +37,14 @@ enum SensorType {
   /// log and the vehicle profile, not by a physical sensor.
   refuel,
 
+  /// OBD-II phase 1 (2026-11-13) — read from the car through the adapter
+  /// (`ObdService`), bytes 6-9. Each widget stays on the dashboard whatever
+  /// the link does and shows its state when there is no value.
+  engineRpm,
+  engineCoolant,
+  batteryVoltage,
+  engineLoad,
+
   /// Sentinel returned by [SensorTypeAdapter.read] for a stored byte that
   /// doesn't match any case above. Never chosen by the user or written back
   /// to Hive — see [SensorWidgetRepository.discardUnknownSensors].
@@ -68,6 +76,14 @@ class SensorTypeAdapter extends TypeAdapter<SensorType> {
         return SensorType.gForce;
       case 5:
         return SensorType.refuel;
+      case 6:
+        return SensorType.engineRpm;
+      case 7:
+        return SensorType.engineCoolant;
+      case 8:
+        return SensorType.batteryVoltage;
+      case 9:
+        return SensorType.engineLoad;
       default:
         return SensorType.unknown;
     }
@@ -90,6 +106,18 @@ class SensorTypeAdapter extends TypeAdapter<SensorType> {
         break;
       case SensorType.refuel:
         writer.writeByte(5);
+        break;
+      case SensorType.engineRpm:
+        writer.writeByte(6);
+        break;
+      case SensorType.engineCoolant:
+        writer.writeByte(7);
+        break;
+      case SensorType.batteryVoltage:
+        writer.writeByte(8);
+        break;
+      case SensorType.engineLoad:
+        writer.writeByte(9);
         break;
       case SensorType.unknown:
         throw ArgumentError('SensorType.unknown must never be persisted');
@@ -135,6 +163,14 @@ enum DisplayStyle {
   artificialHorizon,
   @HiveField(9)
   refuelSummary,
+
+  /// The rev counter (OBD-II phase 1): engine rpm on an arc.
+  @HiveField(10)
+  tachometer,
+
+  /// A big live value with its unit (OBD-II phase 1: coolant, 12 V, load).
+  @HiveField(11)
+  obdValue,
 }
 
 /// Normalized position of a widget on the dashboard grid (0.0 - 1.0 range,

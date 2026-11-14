@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 
 import '../../models/sensor_type_metadata.dart';
 import '../../models/sensor_widget_config.dart';
+import '../../services/driving_session_host.dart';
 import '../../services/sensor_widget_repository.dart';
+import '../../widgets/sensors/obd_widgets.dart' show obdSignalForSensor;
 import 'style_selection_screen.dart';
 
 /// Lets the user toggle which sensors they want on their dashboard.
@@ -42,7 +44,9 @@ class _SensorSelectionScreenState extends State<SensorSelectionScreen> {
   void initState() {
     super.initState();
     final existing = SensorWidgetRepository.all.map((c) => c.sensorType).toSet();
-    _selected = existing.isNotEmpty ? existing : {...sensorTypeMetadata.keys};
+    // First run: everything but the OBD-II tools, which need an adapter —
+    // without one they would only say "Configurar adaptador".
+    _selected = existing.isNotEmpty ? existing : {...sensorTypeMetadata.keys.where((t) => !obdSignalForSensor.containsKey(t))};
   }
 
   void _toggle(SensorType type, bool value) {
@@ -87,9 +91,16 @@ class _SensorSelectionScreenState extends State<SensorSelectionScreen> {
               child: ListView(
                 children: sensorTypeMetadata.keys.map((type) {
                   final meta = sensorTypeMetadata[type]!;
+                  final signal = obdSignalForSensor[type];
+                  // After the first connection, the car's own PID map says
+                  // which of these it does not report (owner decision).
+                  final unsupported = signal != null && DrivingSessionScope.maybeOf(context)?.obd?.supports(signal) == false;
                   return SwitchListTile(
                     secondary: Icon(meta.icon),
                     title: Text(meta.label),
+                    subtitle: signal == null
+                        ? null
+                        : Text(unsupported ? 'Seu carro não informa este dado' : 'Pelo adaptador OBD-II'),
                     value: _selected.contains(type),
                     onChanged: (value) => _toggle(type, value),
                   );
