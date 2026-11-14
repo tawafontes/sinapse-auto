@@ -145,3 +145,33 @@ No Nivus, todo pedido do modo 01 recebe duas respostas (`7E8` motor e `7E9`), e 
 2. **A tela da fase 0 será eliminada** quando os elementos da fase 1 estiverem funcionando e validados no carro. Até lá ela continua como está, e não precisa ganhar o "modo exclusivo" da seção 1. A tela do adaptador da fase 1 assume o diagnóstico.
 3. **Polling rápido a 2 Hz** (rotação e carga a cada ~500 ms), não 4 Hz.
 4. **Durante `reconnecting`** (e em qualquer falha do link com dado anterior), o widget mostra o **último valor** com a **borda em vermelho**, indicando falha ou alerta. Isso substitui o "último valor esmaecido" da seção 2 e muda a regra de validade da seção 6: o valor não vai para `null` depois de 3 s; ele continua no snapshot, marcado como velho (`obdStale`/horário da leitura), e é o widget que pinta a borda.
+
+## 12. Implementação (14/11/2026) — tudo o que não depende do Haval
+
+> Implementado sem a análise prévia do Codex, por decisão do dono ("a auditoria será feita depois"). **Falta a revisão independente** (CLAUDE.md §12) e a validação no carro (§8).
+
+| Commit | O quê |
+|---|---|
+| `ba0ffd6` | `ObdService` (máquina de estados, inicialização a cada conexão, descoberta do motor, mapa de PIDs, polling, backoff), `ObdPreferences`, decodificação multi-PID/ISO-TP/cabeçalhos e o **`FakeObdCar`** (Nivus simulado a partir das transcrições) |
+| `67fd5bd` | Integração: `DrivingSessionHost` dono do serviço, ciclo de vida (segundo plano), `DashboardSensorStreams` (2ª fonte), campos do veículo no `TelemetrySnapshot`, início automático de sessão |
+| `7a3a49a` | Widgets: `SensorType` 6–9 (rotação, temperatura, bateria, carga), `DisplayStyle` 10 (conta-giros) e 11 (valor ao vivo); borda vermelha com o último valor; marcação no "+" |
+| `f3d6e87` | Tela Veículo → Adaptador OBD-II, ícone no topo, pausa do serviço durante a ferramenta da fase 0; correção do início automático |
+
+**Testes:** 14 do serviço (`test/obd_service_test.dart`), 5 dos widgets (`test/obd_widgets_test.dart`) e 2 com o app real sobre o Nivus simulado (`test/session_host/obd_phase1_app_test.dart`, `obd_adapter_screen_app_test.dart`). Suíte completa: 1.605 testes passando.
+
+### Onde a implementação se afastou do rascunho
+
+1. **Polling enquanto há link**, não só "com alguém ouvindo". O app só mantém o link em primeiro plano ou com uma sessão gravando, então a diferença prática é nenhuma, e o código fica mais simples.
+2. **Sem cache do mapa de PIDs** (§8). Reler o mapa custa ~3 pedidos (~300 ms) por conexão, e guardar algo por VIN exigiria guardar o VIN ou um hash estável dele. Fica para quando houver motivo.
+3. **Ponte nativa sem mudanças** (§5). Ela já tenta o método `secure` primeiro (o que funcionou no Nivus), e a queda é detectada pela falta de resposta, então o evento de queda nativo não é necessário.
+4. **Gatilho do início automático:** rotação > 0 **ou** velocidade OBD > 0, uma vez a cada vez que o carro liga (rearmado só quando o carro para de responder). No PHEV, andar no modo EV (0 rpm) dispara pela velocidade. **[Haval]** Confirmar no carro.
+5. **Sensores OBD fora do painel inicial e da seleção inicial** (`obdSensorTypes`): sem adaptador, só diriam "Configurar adaptador".
+6. **Campos no `TelemetrySnapshot`:** `obdLinkState`, `engineRpm`, `engineLoadPercent`, `engineCoolantC` e `vehicleVoltage`, só com valores ao vivo. Os widgets leem o último valor do serviço, via `DashboardSensorStreams.obd`, só para exibição.
+7. **A borda vermelha** usa o mecanismo central de alerta do card (`alertColor`), o mesmo do horizonte artificial, que pisca. Se o dono preferir a borda vermelha fixa, sem piscar, é uma mudança pequena no `DashboardTile`.
+
+### O que ainda depende do Haval
+
+- O comportamento de ignição e READY do PHEV, e se o gatilho de início automático funciona no modo EV.
+- Endereços das ECUs, mapa de PIDs e se o multi-PID é aceito. O serviço já se adapta a cada um desses (descobre o motor, lê o mapa e cai para um PID por pedido).
+- Bateria híbrida (`5B`) como widget, se o Haval tiver esse PID.
+- Validação real em segundo plano (a conexão Bluetooth com a tela desligada e a sessão gravando).
