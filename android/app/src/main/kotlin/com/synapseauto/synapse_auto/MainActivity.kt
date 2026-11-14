@@ -38,7 +38,6 @@ class MainActivity : FlutterActivity() {
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         obdBridge = ObdBridge(applicationContext, flutterEngine.dartExecutor.binaryMessenger)
-        dualCameraProbe = DualCameraProbe(this, flutterEngine.dartExecutor.binaryMessenger, flutterEngine.renderer)
         dualCameraRecorder = DualCameraRecorder(this, flutterEngine.dartExecutor.binaryMessenger, flutterEngine.renderer)
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, STORAGE_CHANNEL).setMethodCallHandler { call, result ->
             when (call.method) {
@@ -243,8 +242,6 @@ class MainActivity : FlutterActivity() {
         galleryExecutor.shutdown()
         obdBridge?.dispose()
         obdBridge = null
-        dualCameraProbe?.release()
-        dualCameraProbe = null
         dualCameraRecorder?.close()
         dualCameraRecorder = null
         super.onDestroy()
@@ -252,9 +249,6 @@ class MainActivity : FlutterActivity() {
 
     /** OBD-II phase 0 link (see [ObdBridge]). */
     private var obdBridge: ObdBridge? = null
-
-    /** Dashcam dual camera phase 0 (see [DualCameraProbe]). */
-    private var dualCameraProbe: DualCameraProbe? = null
 
     /** The dashcam's "Ambas" mode (see [DualCameraRecorder]). */
     private var dualCameraRecorder: DualCameraRecorder? = null

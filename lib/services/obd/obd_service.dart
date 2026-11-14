@@ -139,8 +139,7 @@ class _Cancelled implements Exception {
 }
 
 /// The single owner of the OBD-II link (phase 1). Lives in the
-/// `DrivingSessionHost`; nothing else talks to the [ObdBridge] (the phase 0
-/// test screen pauses this service while it runs). Its readings reach the
+/// `DrivingSessionHost`; nothing else talks to the [ObdBridge]. Its readings reach the
 /// pipeline through `DashboardSensorStreams`, like every other physical source.
 ///
 /// Built on what the Vgate and the Nivus showed in phase 0
@@ -277,8 +276,8 @@ class ObdService extends ChangeNotifier {
     await _release();
   }
 
-  /// The app went to the background with no session recording, or the phase 0
-  /// test screen needs the adapter: let it go. [resume] picks it up again.
+  /// The app went to the background with no session recording: let the
+  /// adapter go. [resume] picks it up again.
   Future<void> pause() => _release();
 
   Future<void> _release() async {

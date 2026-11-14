@@ -39,7 +39,7 @@ import java.io.File
  * into ONE Preview and ONE VideoCapture — one encoder, one file, one audio
  * track — with the secondary camera as a picture-in-picture a third of the
  * size in the lower right corner (owner decisions; measured by the phase 0
- * probe, [DualCameraProbe], on the SM-S918B).
+ * probe on the SM-S918B — `docs/dashcam/dual_camera_handoff.md`).
  *
  * Driven from Dart by `DashcamCameraPlatform`, which presents it to the
  * dashcam as one more camera, so `DashcamService` records with it exactly as
