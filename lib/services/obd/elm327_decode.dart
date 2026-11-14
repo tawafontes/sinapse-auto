@@ -142,3 +142,115 @@ List<String> troubleCodes(String raw, int responseByte) {
   }
   return codes;
 }
+
+/// How many data bytes a mode 01 PID answers with (SAE J1979), for the PIDs
+/// this app reads or may read. `null` for a PID not listed: a multi-PID answer
+/// cannot be walked past it.
+int? mode01DataLength(int pid) {
+  if (pid % 0x20 == 0) return 4; // the "supported PIDs" bitmaps
+  return switch (pid) {
+    0x01 || 0x41 || 0x4F || 0x50 => 4,
+    0x03 || 0x0C || 0x10 || 0x1F || 0x21 || 0x22 || 0x23 || 0x31 || 0x32 || 0x42 || 0x43 || 0x44 || 0x4D || 0x4E => 2,
+    >= 0x14 && <= 0x1B => 2,
+    >= 0x3C && <= 0x3F => 2,
+    0x04 || 0x05 || 0x06 || 0x07 || 0x08 || 0x09 || 0x0A || 0x0B || 0x0D || 0x0E || 0x0F || 0x11 || 0x1C || 0x2C || 0x2D || 0x2E || 0x2F || 0x30 || 0x33 => 1,
+    >= 0x45 && <= 0x4C => 1,
+    0x51 || 0x52 || 0x5A || 0x5B || 0x5C => 1,
+    _ => null,
+  };
+}
+
+/// The data bytes of each of [requested] PIDs in one mode 01 answer — single
+/// or multi-PID (`010C040D11`), single or multi-frame (ISO-TP numbered lines),
+/// with or without spaces. Walks `41 <pid> <data> <pid> <data> …` from the
+/// first `41`, so with headers off only the first ECU's answer counts: phase 1
+/// addresses the engine alone (ATSH7E0) precisely so there is only one. A PID
+/// the ECU left out (unsupported) is simply absent from the result; trailing
+/// padding (`55`, `AA`, `00`) stops the walk.
+Map<int, List<int>> mode01Values(String raw, Iterable<int> requested, {String? command}) {
+  final wanted = requested.toSet();
+  final bytes = responseBytes(raw, command: command);
+  final start = bytes.indexOf(0x41);
+  final values = <int, List<int>>{};
+  if (start < 0) return values;
+  var i = start + 1;
+  while (i < bytes.length) {
+    final pid = bytes[i];
+    if (!wanted.contains(pid) || values.containsKey(pid)) break;
+    final length = mode01DataLength(pid);
+    if (length == null || i + 1 + length > bytes.length) break;
+    values[pid] = bytes.sublist(i + 1, i + 1 + length);
+    i += 1 + length;
+  }
+  return values;
+}
+
+/// The physical value of a mode 01 PID from its data bytes, in the unit the
+/// app shows: rpm, %, °C, km/h, V. `null` for a PID this app does not convert.
+double? mode01Physical(int pid, List<int> d) {
+  if (d.isEmpty) return null;
+  final a = d[0];
+  final ab = d.length >= 2 ? d[0] * 256 + d[1] : d[0];
+  return switch (pid) {
+    0x0C => ab / 4,
+    0x04 || 0x11 || 0x2F || 0x5B => a * 100 / 255,
+    0x05 || 0x0F || 0x46 => (a - 40).toDouble(),
+    0x0D => a.toDouble(),
+    0x42 => ab / 1000,
+    _ => null,
+  };
+}
+
+/// The adapter's own battery reading (`ATRV` → `13.3V`), or `null`.
+double? adapterVoltage(String raw) {
+  for (final line in responseLines(raw, command: 'ATRV')) {
+    final m = RegExp(r'^(\d+(?:\.\d+)?)\s*V$', caseSensitive: false).firstMatch(line);
+    if (m != null) return double.parse(m.group(1)!);
+  }
+  return null;
+}
+
+/// The single-frame answers of an 11-bit CAN reply with headers on (ATH1 ATS0),
+/// by CAN id: `7E8064100BE3EB813` → `0x7E8: [41 00 BE 3E B8 13]`. Lines that
+/// are not a single frame (a multi-frame part, an error) are skipped — only
+/// used to find which ECU is the engine, from its `0100` answer.
+Map<int, List<int>> canSingleFrames(String raw) {
+  final frames = <int, List<int>>{};
+  for (final line in responseLines(raw)) {
+    final t = line.toUpperCase().replaceAll(' ', '');
+    if (!RegExp(r'^[0-9A-F]{3}[0-9A-F]{4,}$').hasMatch(t) || (t.length - 3).isOdd) continue;
+    final id = int.parse(t.substring(0, 3), radix: 16);
+    final payload = [for (var i = 3; i < t.length; i += 2) int.parse(t.substring(i, i + 2), radix: 16)];
+    final pci = payload.first;
+    if (pci >> 4 != 0) continue; // not a single frame
+    final length = pci & 0x0F;
+    if (length == 0 || payload.length < 1 + length) continue;
+    frames.putIfAbsent(id, () => payload.sublist(1, 1 + length));
+  }
+  return frames;
+}
+
+/// Which ECU is the engine, from a headers-on `0100` answer: the 11-bit CAN id
+/// (0x7E8–0x7EF) whose bitmap declares the most PIDs (on the Nivus, 7E8 with 18
+/// against 7E9 with 7), lowest id on a tie. `null` when no such answer.
+int? engineEcuFrom(String raw) {
+  int? best;
+  var bestCount = -1;
+  final frames = canSingleFrames(raw);
+  for (final id in frames.keys.toList()..sort()) {
+    if (id < 0x7E8 || id > 0x7EF) continue;
+    final data = frames[id]!;
+    if (data.length < 6 || data[0] != 0x41 || data[1] != 0x00) continue;
+    var count = 0;
+    for (final b in data.sublist(2, 6)) {
+      for (var bit = 0; bit < 8; bit++) {
+        if (b & (1 << bit) != 0) count++;
+      }
+    }
+    if (count > bestCount) {
+      best = id;
+      bestCount = count;
+    }
+  }
+  return best;
+}
