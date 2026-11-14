@@ -1,5 +1,6 @@
 import '../services/altitude_trend.dart';
 import '../services/gnss_quality.dart';
+import '../services/obd/obd_service.dart' show ObdLinkState;
 
 /// Central, immutable telemetry sample — the single struct every consumer
 /// downstream of the Telemetry Engine (sessions, alerts, HUD, diagnostics)
@@ -38,6 +39,11 @@ class TelemetrySnapshot {
     this.pitchDegrees,
     this.rollDegrees,
     this.barometerActive = false,
+    this.obdLinkState,
+    this.engineRpm,
+    this.engineLoadPercent,
+    this.engineCoolantC,
+    this.vehicleVoltage,
   });
 
   /// Real wall-clock capture time of this sample — never derived from a UI
@@ -107,6 +113,24 @@ class TelemetrySnapshot {
   /// barometer-fused (rather than GPS-only) altitude — also the one signal
   /// a future Dashcam-readiness check would want from this model.
   final bool barometerActive;
+
+  /// The OBD-II link's state (phase 1), or `null` when the app has no OBD
+  /// service at all. The vehicle fields below come from it.
+  final ObdLinkState? obdLinkState;
+
+  /// Vehicle fields from the OBD-II adapter (phase 1), all optional and all
+  /// **live only**: `null` when the car does not report the value, the link
+  /// is down, or the last reading is older than `ObdService.maxAge` — a
+  /// consumer never sees a stale engine value as if it were current. (The
+  /// dashboard widgets do show the last value after a drop, with a red
+  /// border, but they read it from the service, not from here.)
+  final double? engineRpm;
+  final double? engineLoadPercent;
+  final double? engineCoolantC;
+
+  /// The car's 12 V system as the adapter reads it on the OBD socket (ATRV) —
+  /// live while the car answers or is being waited for.
+  final double? vehicleVoltage;
 
   /// Whether [latitude]/[longitude] are present at all — does not by itself
   /// imply the fix is *good*, only that one has been obtained; check

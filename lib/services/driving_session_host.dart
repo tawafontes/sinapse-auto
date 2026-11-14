@@ -11,6 +11,9 @@ import 'dashcam_service.dart';
 import 'dashcam_session_controller.dart';
 import 'driving_session_recorder.dart';
 import 'event_detection_engine.dart';
+import 'obd/obd_bridge.dart';
+import 'obd/obd_preferences.dart';
+import 'obd/obd_service.dart';
 import 'power_profile_preferences.dart';
 import 'sensor_service.dart';
 
@@ -73,13 +76,23 @@ class DrivingSessionHost {
     required PowerProfilePreferences powerProfile,
     required AlertPreferences alertPreferences,
     required DashcamPreferences dashcamPreferences,
+    ObdPreferences? obdPreferences,
+    ObdBridge? obdBridge,
   }) {
     final sensorService = SensorService();
-    final streams = DashboardSensorStreams(sensorService, powerProfile: powerProfile);
+    // OBD-II phase 1: the second physical source, only where there is an
+    // adapter to talk to (the native bridge is Android only) and the app gave
+    // its preferences — tests that do not care get none.
+    final bridge = obdBridge ??
+        debugObdBridgeOverride ??
+        (MethodChannelObdBridge.isSupported ? const MethodChannelObdBridge() : null);
+    final obd = obdPreferences == null || bridge == null ? null : ObdService(bridge: bridge, preferences: obdPreferences);
+    final streams = DashboardSensorStreams(sensorService, powerProfile: powerProfile, obd: obd);
     final recorder = DrivingSessionRecorder(streams.snapshot);
     final eventEngine = EventDetectionEngine(streams.snapshot, alertPreferences);
     return DrivingSessionHost._(
       dashcamPreferences,
+      obd: obd,
       sensorService: sensorService,
       streams: streams,
       recorder: recorder,
@@ -97,6 +110,7 @@ class DrivingSessionHost {
 
   DrivingSessionHost._(
     this._dashcamPreferences, {
+    this.obd,
     required this.sensorService,
     required this.streams,
     required this.recorder,
@@ -106,9 +120,32 @@ class DrivingSessionHost {
   }) {
     recorder.addListener(_syncEventForwarding);
     _dashcamPreferences.addListener(_onDashcamPreferencesChanged);
+    final obd = this.obd;
+    if (obd != null) {
+      recorder.addListener(_syncObdWithRecorder);
+      _obdReadings = obd.readingsStream.listen((_) => _maybeAutoStartSession());
+      // The app is opening: connect silently, if the owner wants it automatic.
+      obd.resume();
+    }
   }
 
   final DashcamPreferences _dashcamPreferences;
+
+  /// The adapter bridge the real app's host uses in a test (the app mounts
+  /// its own host, and the test host is not Android) — a scripted car.
+  @visibleForTesting
+  static ObdBridge? debugObdBridgeOverride;
+
+  /// The single owner of the OBD-II link (phase 1); `null` when the app has
+  /// no adapter bridge (see the factory).
+  final ObdService? obd;
+  StreamSubscription<ObdReadings>? _obdReadings;
+  bool _inForeground = true;
+
+  /// Whether the next "car answering and moving" may start a session — once
+  /// per time the car comes on, so stopping a session by hand while the
+  /// engine runs does not start another one right away.
+  bool _autoStartArmed = true;
   final SensorService sensorService;
   final DashboardSensorStreams streams;
   final DrivingSessionRecorder recorder;
@@ -135,6 +172,55 @@ class DrivingSessionHost {
       final forwarding = _eventForwarding;
       _eventForwarding = null;
       unawaited(forwarding?.cancel());
+    }
+  }
+
+  /// Forwarded from the root `State`'s `WidgetsBindingObserver`. In the
+  /// background the OBD link stays up only while a session records (owner
+  /// decision); otherwise the adapter is let go, and picked up again on
+  /// return.
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    final obd = this.obd;
+    if (obd == null || _disposed) return;
+    switch (state) {
+      case AppLifecycleState.resumed:
+        _inForeground = true;
+        obd.resume();
+      case AppLifecycleState.paused || AppLifecycleState.hidden || AppLifecycleState.detached:
+        _inForeground = false;
+        _syncObdWithRecorder();
+      case AppLifecycleState.inactive:
+        break;
+    }
+  }
+
+  void _syncObdWithRecorder() {
+    final obd = this.obd;
+    if (obd == null || _inForeground) return;
+    if (recorder.state != DrivingSessionRecorderState.recording) unawaited(obd.pause());
+  }
+
+  /// "Iniciar sessão quando o carro ligar" (off by default): the car answering
+  /// is not enough — on the Nivus the ECUs answer with the ignition on and the
+  /// engine stopped — so the trigger is the engine turning (rpm > 0) or the
+  /// car moving (OBD speed > 0, which also covers a plug-in hybrid driving
+  /// electric with the engine at 0 rpm).
+  void _maybeAutoStartSession() {
+    final obd = this.obd;
+    if (obd == null || _disposed) return;
+    if (obd.state != ObdLinkState.receiving) {
+      _autoStartArmed = true;
+      return;
+    }
+    if (!_autoStartArmed || !_inForeground || !obd.preferences.autoStartSession) return;
+    if (recorder.state != DrivingSessionRecorderState.idle) return;
+    double live(ObdSignal signal) => obd.isFresh(signal) ? obd.readings[signal]?.value ?? 0 : 0;
+    if (live(ObdSignal.rpm) <= 0 && live(ObdSignal.speed) <= 0) return;
+    _autoStartArmed = false;
+    try {
+      dashcamController.startSession();
+    } on SessionAdmissionRejected {
+      // A session is still being finalized: nothing was touched.
     }
   }
 
@@ -179,7 +265,14 @@ class DrivingSessionHost {
     if (_disposed) return;
     _disposed = true;
     recorder.removeListener(_syncEventForwarding);
+    recorder.removeListener(_syncObdWithRecorder);
     _dashcamPreferences.removeListener(_onDashcamPreferencesChanged);
+    unawaited(_obdReadings?.cancel());
+    final obd = this.obd;
+    if (obd != null) {
+      unawaited(obd.pause());
+      obd.dispose();
+    }
     final forwarding = _eventForwarding;
     _eventForwarding = null;
     unawaited(forwarding?.cancel());

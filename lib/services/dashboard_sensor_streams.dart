@@ -10,6 +10,7 @@ import 'altitude_trend.dart';
 import 'complementary_filter.dart';
 import 'display_smoothing.dart';
 import 'gnss_quality.dart';
+import 'obd/obd_service.dart';
 import 'power_profile_preferences.dart';
 import 'sensor_service.dart';
 import 'stream_pairing.dart';
@@ -183,11 +184,19 @@ bool shouldEmitThrottled({required DateTime? lastEmitted, required DateTime now,
 }
 
 class DashboardSensorStreams {
-  DashboardSensorStreams(this.sensors, {PowerProfilePreferences? powerProfile})
+  DashboardSensorStreams(this.sensors, {PowerProfilePreferences? powerProfile, this.obd})
     : engine = TelemetryEngine(sensors, powerProfile: powerProfile);
 
   final SensorService sensors;
   final TelemetryEngine engine;
+
+  /// The second physical source (OBD-II phase 1), owned by the
+  /// `DrivingSessionHost`; `null` where the app has none (tests, non-Android).
+  /// Its live values join [snapshot]; the dashboard's OBD widgets also read
+  /// its last values and link state from here, to show the last value with a
+  /// red border after a drop (owner decision) — display only, they never talk
+  /// to the adapter.
+  final ObdService? obd;
 
   static const _gravity = 9.80665;
 
@@ -428,6 +437,8 @@ class DashboardSensorStreams {
     var gnssQualityValue = GnssQuality.unavailable;
     var altitudeTrendValue = AltitudeTrend.stable;
     var barometerActiveValue = false;
+    ObdLinkState? obdState = obd?.state;
+    double? engineRpm, engineLoad, engineCoolant, vehicleVoltage;
     DateTime? lastGpsCadenceEmit;
 
     void emitNow() {
@@ -450,6 +461,11 @@ class DashboardSensorStreams {
           pitchDegrees: pitch,
           rollDegrees: roll,
           barometerActive: barometerActiveValue,
+          obdLinkState: obdState,
+          engineRpm: engineRpm,
+          engineLoadPercent: engineLoad,
+          engineCoolantC: engineCoolant,
+          vehicleVoltage: vehicleVoltage,
         ),
       );
     }
@@ -529,6 +545,24 @@ class DashboardSensorStreams {
             emitThrottled();
           }),
         );
+        // OBD-II (phase 1): at most 2 Hz, so on the throttled path like GPS.
+        // Only live values go in — see TelemetrySnapshot's vehicle fields. The
+        // service also emits on every link state change, which is what turns
+        // these back to null after a drop.
+        final obdService = obd;
+        if (obdService != null) {
+          subs.add(
+            obdService.readingsStream.listen((readings) {
+              double? live(ObdSignal signal) => obdService.isFresh(signal) ? readings[signal]?.value : null;
+              obdState = obdService.state;
+              engineRpm = live(ObdSignal.rpm);
+              engineLoad = live(ObdSignal.engineLoad);
+              engineCoolant = live(ObdSignal.coolant);
+              vehicleVoltage = live(ObdSignal.adapterVoltage);
+              emitThrottled();
+            }),
+          );
+        }
         // G-force trigger path — deliberately NOT throttled (see this
         // field's own doc for why).
         subs.add(

@@ -13,6 +13,7 @@ import 'services/dashcam_storage_quota.dart' show measureDashcamStorageAtStartup
 import 'services/driving_session_host.dart';
 import 'services/driving_session_recorder.dart' show recoverDrivingSessionsAtStartup;
 import 'services/hive_boxes.dart';
+import 'services/obd/obd_preferences.dart';
 import 'services/power_profile_preferences.dart';
 import 'services/sensor_records.dart';
 import 'services/sensor_widget_repository.dart';
@@ -65,6 +66,7 @@ class _SynapseAutoAppState extends State<SynapseAutoApp> with WidgetsBindingObse
   final AlertPreferences _alertPreferences = AlertPreferences();
   final PowerProfilePreferences _powerProfilePreferences = PowerProfilePreferences();
   final DashcamPreferences _dashcamPreferences = DashcamPreferences();
+  final ObdPreferences _obdPreferences = ObdPreferences();
 
   /// Fase 16.2-R4.3-R2.6.8: the driving session and everything it depends on
   /// (see [DrivingSessionHost]) live exactly as long as this app — not as long
@@ -79,6 +81,7 @@ class _SynapseAutoAppState extends State<SynapseAutoApp> with WidgetsBindingObse
       powerProfile: _powerProfilePreferences,
       alertPreferences: _alertPreferences,
       dashcamPreferences: _dashcamPreferences,
+      obdPreferences: _obdPreferences,
     );
     WidgetsBinding.instance.addObserver(this);
     // Covers the initial foreground launch; didChangeAppLifecycleState
@@ -93,6 +96,9 @@ class _SynapseAutoAppState extends State<SynapseAutoApp> with WidgetsBindingObse
   // FLAG_KEEP_SCREEN_ON window flag, not a brightness override.
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    // OBD-II: in the background the adapter is kept only while a session
+    // records (see DrivingSessionHost.didChangeAppLifecycleState).
+    _sessionHost.didChangeAppLifecycleState(state);
     if (state == AppLifecycleState.resumed) {
       unawaited(WakelockPlus.enable());
     } else {
@@ -111,6 +117,7 @@ class _SynapseAutoAppState extends State<SynapseAutoApp> with WidgetsBindingObse
     _alertPreferences.dispose();
     _powerProfilePreferences.dispose();
     _dashcamPreferences.dispose();
+    _obdPreferences.dispose();
     super.dispose();
   }
 
