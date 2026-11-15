@@ -10,6 +10,7 @@ import 'package:synapse_auto/services/obd/obd_consumption.dart';
 import 'package:synapse_auto/services/obd/obd_preferences.dart';
 import 'package:synapse_auto/services/obd/obd_service.dart';
 import 'package:synapse_auto/services/vehicle_repository.dart';
+import 'package:synapse_auto/widgets/sensors/obd_gauges.dart';
 import 'package:synapse_auto/widgets/sensors/obd_panel.dart';
 
 import 'support/fake_obd_car.dart';
@@ -88,7 +89,10 @@ void main() {
       await tester.pump(const Duration(seconds: 12));
     }
 
-    String line(WidgetTester tester, String label) => tester.widget<Text>(find.byKey(ValueKey('obdPanel_$label'))).textSpan!.toPlainText();
+    String line(WidgetTester tester, String label) => () {
+          final text = tester.widget<Text>(find.byKey(ValueKey('obdPanel_$label')));
+          return text.textSpan?.toPlainText() ?? text.data!;
+        }();
 
     testWidgets('fuel: %, litres with the tank of Meu veículo; maximized, the ethanol share', (tester) async {
       await tester.runAsync(() => profile());
@@ -103,8 +107,9 @@ void main() {
       await unmount(tester, service);
     });
 
-    testWidgets('temperatures: intake, ambient, catalyst; maximized, the manifold pressure', (tester) async {
+    testWidgets('temperatures: engine, intake, ambient, catalyst; maximized, the manifold pressure', (tester) async {
       var service = await mount(tester, SensorType.engineTemperatures);
+      expect(line(tester, 'Motor'), '81 °C', reason: 'the engine temperature card moved here (2026-11-15)');
       expect(line(tester, 'Admissão'), '34 °C');
       expect(line(tester, 'Ambiente'), '27 °C');
       expect(line(tester, 'Catalisador'), '512 °C');
@@ -120,7 +125,7 @@ void main() {
       final service = await mount(tester, SensorType.accelerator);
       expect(line(tester, 'Acelerador'), '16 %');
       expect(line(tester, 'Pedal'), '18 %');
-      expect(find.byType(LinearProgressIndicator), findsNWidgets(2));
+      expect(find.byType(ObdScaleBar), findsNWidgets(2));
       await unmount(tester, service);
     });
 
@@ -153,6 +158,44 @@ void main() {
           await unmount(tester, service);
         }
       }
+    });
+
+    testWidgets('drawn, not listed: the tank gauge, the temperature scales, the consumption chart', (tester) async {
+      await tester.runAsync(() => profile(displacement: 1.0));
+      var service = await mount(tester, SensorType.fuelLevel);
+      expect(find.byType(ObdArcGauge), findsOneWidget);
+      await unmount(tester, service);
+
+      service = await mount(tester, SensorType.engineTemperatures);
+      expect(find.byType(ObdScaleBar), findsNWidgets(4));
+      await unmount(tester, service);
+
+      service = await mount(tester, SensorType.fuelConsumption);
+      await tester.pump(const Duration(seconds: 20));
+      final chart = tester.widget<ObdSparkline>(find.byType(ObdSparkline));
+      expect(chart.points.length, greaterThan(10), reason: 'the last minutes, at 2 Hz');
+      expect(find.text('L/h · últimos 2 min'), findsOneWidget);
+      await unmount(tester, service);
+    });
+
+    testWidgets('a rebuilt card clears the red the dashboard still holds', (tester) async {
+      // The phone: every card red with live values — a card recreated after a
+      // drop never told the dashboard the link was back.
+      final alerts = <Color?>[];
+      final service = ObdService(bridge: car, preferences: prefs, now: () => tester.binding.clock.now());
+      Widget card(Key key) => MaterialApp(
+            home: Scaffold(
+              body: SizedBox(width: 240, height: 240, child: ObdPanelView(key: key, sensorType: SensorType.accelerator, service: service, onAlertColorChanged: alerts.add)),
+            ),
+          );
+      await tester.pumpWidget(card(const ValueKey(1)));
+      service.connect();
+      await tester.pump(const Duration(seconds: 5));
+      await tester.pumpWidget(card(const ValueKey(2)));
+      await tester.pump();
+      expect(alerts, isNotEmpty);
+      expect(alerts.last, isNull, reason: 'the new card reports at once, even with no alert');
+      await unmount(tester, service);
     });
 
     testWidgets('a dropped link: last values, red border; Desconectar: none', (tester) async {

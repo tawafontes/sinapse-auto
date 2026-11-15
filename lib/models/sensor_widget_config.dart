@@ -38,10 +38,11 @@ enum SensorType {
   refuel,
 
   /// OBD-II phase 1 (2026-11-13) — read from the car through the adapter
-  /// (`ObdService`), bytes 6-9. Each widget stays on the dashboard whatever
-  /// the link does and shows its state when there is no value.
+  /// (`ObdService`), bytes 6 and 8-9. Each widget stays on the dashboard
+  /// whatever the link does and shows its state when there is no value.
+  /// Byte 7 (`engineCoolant`, the engine temperature card) was retired on
+  /// 2026-11-15: the engine temperature moved into [engineTemperatures].
   engineRpm,
-  engineCoolant,
   batteryVoltage,
   engineLoad,
 
@@ -66,8 +67,8 @@ enum SensorType {
 ///
 /// Field numbers must never be reassigned or reused for a different sensor:
 /// when retiring one, delete its `case` here (and the member from
-/// [SensorType]) but leave the number's gap untouched. Byte 1 (`compass`)
-/// is exactly such a gap now.
+/// [SensorType]) but leave the number's gap untouched. Bytes 1 (`compass`)
+/// and 7 (`engineCoolant`) are such gaps now.
 class SensorTypeAdapter extends TypeAdapter<SensorType> {
   @override
   final int typeId = 0;
@@ -87,8 +88,6 @@ class SensorTypeAdapter extends TypeAdapter<SensorType> {
         return SensorType.refuel;
       case 6:
         return SensorType.engineRpm;
-      case 7:
-        return SensorType.engineCoolant;
       case 8:
         return SensorType.batteryVoltage;
       case 9:
@@ -126,9 +125,6 @@ class SensorTypeAdapter extends TypeAdapter<SensorType> {
         break;
       case SensorType.engineRpm:
         writer.writeByte(6);
-        break;
-      case SensorType.engineCoolant:
-        writer.writeByte(7);
         break;
       case SensorType.batteryVoltage:
         writer.writeByte(8);

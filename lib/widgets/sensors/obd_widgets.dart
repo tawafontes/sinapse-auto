@@ -7,11 +7,11 @@ import '../../models/detected_event.dart';
 import '../../models/sensor_widget_config.dart';
 import '../../services/dashboard_alerts.dart';
 import '../../services/obd/obd_service.dart';
+import 'obd_gauges.dart';
 
 /// Which OBD value a dashboard sensor shows.
 const Map<SensorType, ObdSignal> obdSignalForSensor = {
   SensorType.engineRpm: ObdSignal.rpm,
-  SensorType.engineCoolant: ObdSignal.coolant,
   SensorType.batteryVoltage: ObdSignal.adapterVoltage,
   SensorType.engineLoad: ObdSignal.engineLoad,
   // The panels, by the value that decides whether the car reports them at all.
@@ -79,6 +79,7 @@ class _ObdSignalViewState extends State<ObdSignalView> {
   StreamSubscription<ObdReadings>? _readings;
   Timer? _freshness;
   Color? _reportedAlert;
+  bool _reportedOnce = false;
 
   @override
   void initState() {
@@ -116,8 +117,11 @@ class _ObdSignalViewState extends State<ObdSignalView> {
     if (mounted) setState(() {});
   }
 
+  /// The first report always goes out: a card rebuilt (page swipe, maximize)
+  /// must clear a red the dashboard still holds from the card it replaced.
   void _reportAlert(Color? color) {
-    if (color == _reportedAlert) return;
+    if (_reportedOnce && color == _reportedAlert) return;
+    _reportedOnce = true;
     _reportedAlert = color;
     final callback = widget.onAlertColorChanged;
     if (callback == null) return;
@@ -175,38 +179,48 @@ class _ObdSignalViewState extends State<ObdSignalView> {
     if (widget.tachometer) {
       return _Tachometer(rpm: value, text: text, unit: widget.unit, color: valueColor, caption: caption);
     }
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        return Center(
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Flexible(
-                  child: FittedBox(
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.baseline,
-                      textBaseline: TextBaseline.alphabetic,
-                      children: [
-                        Text(
-                          text,
-                          key: const ValueKey('obdValueText'),
-                          style: theme.textTheme.displayMedium?.copyWith(color: valueColor, fontWeight: FontWeight.w600),
-                        ),
-                        const SizedBox(width: 4),
-                        Text(widget.unit, style: theme.textTheme.titleMedium?.copyWith(color: valueColor)),
-                      ],
-                    ),
-                  ),
-                ),
-                if (caption != null)
-                  Text(caption, style: theme.textTheme.labelSmall?.copyWith(color: theme.colorScheme.error), maxLines: 1, overflow: TextOverflow.ellipsis),
-              ],
-            ),
+    final number = FittedBox(
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.baseline,
+        textBaseline: TextBaseline.alphabetic,
+        children: [
+          Text(
+            text,
+            key: const ValueKey('obdValueText'),
+            style: theme.textTheme.displayLarge?.copyWith(color: valueColor, fontWeight: FontWeight.w700),
           ),
-        );
-      },
+          const SizedBox(width: 4),
+          Text(widget.unit, style: theme.textTheme.headlineSmall?.copyWith(color: valueColor)),
+        ],
+      ),
+    );
+    Widget captionText() => Text(caption!, style: theme.textTheme.labelSmall?.copyWith(color: theme.colorScheme.error), maxLines: 1, overflow: TextOverflow.ellipsis);
+
+    // The drawings (owner request, 2026-11-15): an arc for the load, a
+    // coloured scale under the voltage.
+    final Widget body = switch (widget.signal) {
+      ObdSignal.engineLoad => Center(
+          child: ObdArcGauge(value: value, min: 0, max: 100, stops: ObdScales.load, dimmed: stale, child: number),
+        ),
+      ObdSignal.adapterVoltage || ObdSignal.moduleVoltage => Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Expanded(child: Center(child: number)),
+            ObdScaleBar(value: value, min: 10.5, max: 15.8, stops: ObdScales.battery, thickness: 12, dimmed: stale),
+            const SizedBox(height: 4),
+          ],
+        ),
+      _ => Center(child: number),
+    };
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Expanded(child: body),
+          if (caption != null) Center(child: captionText()),
+        ],
+      ),
     );
   }
 }

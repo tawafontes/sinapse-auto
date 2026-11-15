@@ -22,7 +22,6 @@ const Map<SensorType, List<DisplayStyle>> validDisplayStylesForSensor = {
   SensorType.gForce: [DisplayStyle.gForceMeter],
   SensorType.refuel: [DisplayStyle.refuelSummary],
   SensorType.engineRpm: [DisplayStyle.tachometer, DisplayStyle.obdValue],
-  SensorType.engineCoolant: [DisplayStyle.obdValue],
   SensorType.batteryVoltage: [DisplayStyle.obdValue],
   SensorType.engineLoad: [DisplayStyle.obdValue],
   SensorType.fuelLevel: [DisplayStyle.obdPanel],

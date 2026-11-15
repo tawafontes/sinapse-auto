@@ -21,7 +21,6 @@ const Map<SensorType, SensorTypeMetadata> sensorTypeMetadata = {
   SensorType.gForce: SensorTypeMetadata(label: 'Aceleração G', icon: Icons.bolt, unit: 'g'),
   SensorType.refuel: SensorTypeMetadata(label: 'Abastecimento', icon: Icons.local_gas_station, unit: 'km'),
   SensorType.engineRpm: SensorTypeMetadata(label: 'Rotação', icon: Icons.av_timer, unit: 'rpm'),
-  SensorType.engineCoolant: SensorTypeMetadata(label: 'Temperatura do motor', icon: Icons.thermostat, unit: '°C'),
   SensorType.batteryVoltage: SensorTypeMetadata(label: 'Bateria', icon: Icons.battery_charging_full, unit: 'V'),
   SensorType.engineLoad: SensorTypeMetadata(label: 'Carga do motor', icon: Icons.speed, unit: '%'),
   SensorType.fuelLevel: SensorTypeMetadata(label: 'Nível do tanque', icon: Icons.local_gas_station_outlined, unit: '%'),
@@ -35,7 +34,6 @@ const Map<SensorType, SensorTypeMetadata> sensorTypeMetadata = {
 /// adapter they would only say "Configurar adaptador".
 const Set<SensorType> obdSensorTypes = {
   SensorType.engineRpm,
-  SensorType.engineCoolant,
   SensorType.batteryVoltage,
   SensorType.engineLoad,
   SensorType.fuelLevel,

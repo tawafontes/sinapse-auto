@@ -27,7 +27,7 @@ void main() {
     try {
       await app.run(() async {
         await app.boot(
-          seedTiles: const {SensorType.engineRpm: DisplayStyle.tachometer, SensorType.engineCoolant: DisplayStyle.obdValue},
+          seedTiles: const {SensorType.engineRpm: DisplayStyle.tachometer, SensorType.engineLoad: DisplayStyle.obdValue},
           beforeBootstrap: () async {
             final box = Hive.box(HiveBoxNames.appSettings);
             await box.put('obdAdapterAddress', '10:21:3E:4C:3A:AF');
@@ -61,7 +61,7 @@ void main() {
         car.ignition = FakeIgnition.running;
         await app.driveUntil(() => recorder.state == DrivingSessionRecorderState.recording, label: 'session started by the car');
         await app.driveUntil(() => tileShows(SensorType.engineRpm, '982'), label: 'rpm on the rev counter');
-        await app.driveUntil(() => tileShows(SensorType.engineCoolant, '81'), label: 'coolant on its card');
+        await app.driveUntil(() => tileShows(SensorType.engineLoad, '17'), label: 'load on its card');
         final snapshot = await app.driveFuture(app.host.streams.snapshot.firstWhere((s) => s.engineRpm != null));
         expect(snapshot.engineRpm, 982);
         expect(snapshot.obdLinkState, ObdLinkState.receiving);
@@ -70,18 +70,18 @@ void main() {
         // The adapter is pulled: last value, red border; then it comes back.
         car.unplug();
         await app.driveUntil(() => obd.state == ObdLinkState.reconnecting, label: 'link lost');
-        await app.driveUntil(() => tile(SensorType.engineCoolant).alertColor != null, label: 'red border');
-        expect(tileShows(SensorType.engineCoolant, '81'), isTrue, reason: 'the last value stays');
+        await app.driveUntil(() => tile(SensorType.engineLoad).alertColor != null, label: 'red border');
+        expect(tileShows(SensorType.engineLoad, '17'), isTrue, reason: 'the last value stays');
         // A steady red border (owner decision, 2026-11-14), not a blink: the
         // same red across more than one blink interval.
         Color border() {
           final body = find.descendant(
-            of: find.byWidgetPredicate((w) => w is DashboardTile && w.label == sensorTypeMetadata[SensorType.engineCoolant]!.label),
+            of: find.byWidgetPredicate((w) => w is DashboardTile && w.label == sensorTypeMetadata[SensorType.engineLoad]!.label),
             matching: find.byKey(const ValueKey('dashboardTileVisualBody')),
           );
           return ((tester.widget<Container>(body).decoration! as BoxDecoration).border! as Border).top.color;
         }
-        final red = tile(SensorType.engineCoolant).alertColor!;
+        final red = tile(SensorType.engineLoad).alertColor!;
         for (var i = 0; i < 4; i++) {
           expect(border(), red, reason: 'steady, check $i');
           await tester.pump(const Duration(milliseconds: 300));
@@ -90,7 +90,7 @@ void main() {
         expect(stale.engineRpm, isNull, reason: 'the snapshot carries live values only');
         car.plugIn();
         await app.driveUntil(() => obd.state == ObdLinkState.receiving, timeout: const Duration(seconds: 40), label: 'reconnected');
-        await app.driveUntil(() => tile(SensorType.engineCoolant).alertColor == null, label: 'border back to normal');
+        await app.driveUntil(() => tile(SensorType.engineLoad).alertColor == null, label: 'border back to normal');
 
         // Stopped by hand while the engine runs: not restarted.
         await app.stopSessionViaUi();
