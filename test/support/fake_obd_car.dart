@@ -82,6 +82,15 @@ class FakeObdCar implements ObdBridge {
   double ambientC = 27;
   double catalystC = 512;
   double pedalPercent = 18;
+  double odometerKm = 23456.7;
+
+  /// The Haval H6 PHEV's extra: the odometer (PID A6), which the Nivus lacks.
+  void reportOdometer() {
+    engine.bitmaps[0x40] = [...engine.bitmaps[0x40]!.take(3), engine.bitmaps[0x40]![3] | 0x01];
+    engine.bitmaps[0x60] = [0x00, 0x00, 0x00, 0x01];
+    engine.bitmaps[0x80] = [0x00, 0x00, 0x00, 0x01];
+    engine.bitmaps[0xA0] = [0x04, 0x00, 0x00, 0x00];
+  }
 
   /// The intake manifold pressure: about atmospheric with the engine stopped,
   /// ~35 kPa idling (vacuum).
@@ -90,6 +99,11 @@ class FakeObdCar implements ObdBridge {
   /// When false, a multi-PID request gets only its first PID answered (some
   /// cars do this), so the service has to fall back to one PID per request.
   bool acceptsMultiPid = true;
+
+  /// The Haval H6 PHEV (2026-11-15): a mode 01 request addressed to the
+  /// engine alone (ATSH7E0) gets `7F 01 11` (service not supported); only
+  /// functional requests are answered.
+  bool refusesPhysicalMode01 = false;
 
   bool _connected = false;
   bool _plugged = true;
@@ -100,6 +114,7 @@ class FakeObdCar implements ObdBridge {
   bool _spaces = true;
   bool _headers = false;
   int _header = 0x7DF;
+  int? _receiveFilter;
   int _functionalAnswers = 0;
 
   int get connects => _connects;
@@ -122,6 +137,7 @@ class FakeObdCar implements ObdBridge {
     _spaces = true;
     _headers = false;
     _header = 0x7DF;
+    _receiveFilter = null;
   }
 
   double get batteryVolts => switch (ignition) {
@@ -203,6 +219,14 @@ class FakeObdCar implements ObdBridge {
         return 'OK';
       case 'L0' || 'L1' || 'SP0':
         return 'OK';
+      case 'AR':
+        _receiveFilter = null;
+        return 'OK';
+    }
+    final cra = RegExp(r'^CRA([0-9A-F]{3})$').firstMatch(c);
+    if (cra != null) {
+      _receiveFilter = int.parse(cra.group(1)!, radix: 16);
+      return 'OK';
     }
     final sh = RegExp(r'^SH([0-9A-F]{3})$').firstMatch(c);
     if (sh != null) {
@@ -219,7 +243,10 @@ class FakeObdCar implements ObdBridge {
       0x7DF => ecus,
       _ => ecus.where((e) => e.requestId == _header).toList(),
     };
+    if (_header != 0x7DF && refusesPhysicalMode01) return _bytes([0x7F, 0x01, 0x11]);
     if (_header == 0x7DF && (_functionalAnswers++).isOdd) targets = targets.reversed.toList();
+    final filter = _receiveFilter;
+    if (filter != null) targets = targets.where((e) => e.responseId == filter).toList();
     final answers = <String>[];
     for (final ecu in targets) {
       final asked = acceptsMultiPid ? pids : pids.take(1).toList();
@@ -265,6 +292,10 @@ class FakeObdCar implements ObdBridge {
           return [mv >> 8, mv & 0xFF];
         }(),
       0x01 => [0x00, 0x07, 0xE1, 0x00],
+      0xA6 => () {
+          final raw = (odometerKm * 10).round();
+          return [raw >> 24 & 0xFF, raw >> 16 & 0xFF, raw >> 8 & 0xFF, raw & 0xFF];
+        }(),
       _ => null,
     };
   }

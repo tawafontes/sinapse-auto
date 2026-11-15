@@ -51,6 +51,11 @@ enum ObdSignal {
   manifoldPressure,
   pedal,
   maf,
+
+  /// 2026-11-15: the car's own odometer (km), on cars that report it (the
+  /// Haval H6 PHEV does, the Nivus does not) — fills the refuel and recharge
+  /// forms.
+  odometer,
 }
 
 /// The mode 01 PID behind each [ObdSignal] (`adapterVoltage` is `ATRV`).
@@ -68,6 +73,7 @@ const Map<ObdSignal, int> obdSignalPids = {
   ObdSignal.catalystTemp: 0x3C,
   ObdSignal.manifoldPressure: 0x0B,
   ObdSignal.pedal: 0x49,
+  ObdSignal.odometer: 0xA6,
   ObdSignal.maf: 0x10,
 };
 
@@ -103,6 +109,7 @@ class ObdLinkInfo {
     this.elmVersion,
     this.protocol,
     this.engineEcu,
+    this.engineByFilter = false,
     this.supportedPids,
     this.multiPid = true,
   });
@@ -119,6 +126,12 @@ class ObdLinkInfo {
   /// alone (ATSH7E0). `null`: requests stay functional (7DF).
   final int? engineEcu;
 
+  /// How the engine is reached: `false`, addressed alone (ATSH7E0, the
+  /// Nivus); `true`, functional requests (7DF) with the adapter keeping only
+  /// the engine's answers (ATCRA7E8) — the Haval H6 PHEV refuses a physical
+  /// mode 01 request (`7F 01 11`, 2026-11-15) but answers a functional one.
+  final bool engineByFilter;
+
   /// The mode 01 PIDs the engine declares; `null` until the car first answered.
   final Set<int>? supportedPids;
 
@@ -131,6 +144,7 @@ class ObdLinkInfo {
     String? elmVersion,
     String? protocol,
     int? engineEcu,
+    bool? engineByFilter,
     bool clearEngineEcu = false,
     Set<int>? supportedPids,
     bool? multiPid,
@@ -141,6 +155,7 @@ class ObdLinkInfo {
         elmVersion: elmVersion ?? this.elmVersion,
         protocol: protocol ?? this.protocol,
         engineEcu: clearEngineEcu ? null : (engineEcu ?? this.engineEcu),
+        engineByFilter: clearEngineEcu ? false : (engineByFilter ?? this.engineByFilter),
         supportedPids: supportedPids ?? this.supportedPids,
         multiPid: multiPid ?? this.multiPid,
       );
@@ -210,6 +225,14 @@ class ObdService extends ChangeNotifier {
   static const waitingPeriod = Duration(seconds: 3);
   static const requestTimeout = Duration(milliseconds: 500);
 
+  /// A data request with the engine reached through the adapter's filter
+  /// ([ObdLinkInfo.engineByFilter]): every ECU answers a functional request,
+  /// and on the Haval H6 PHEV the engine's answer drifted past 500 ms
+  /// (317, 388, 475 ms, then three misses: a false "link lost", 2026-11-15).
+  static const filteredRequestTimeout = Duration(milliseconds: 1500);
+
+  Duration get _dataTimeout => _info.engineByFilter ? filteredRequestTimeout : requestTimeout;
+
   /// With the car off the Nivus' adapter took up to ~500 ms to answer ATRV.
   static const slowCommandTimeout = Duration(milliseconds: 1500);
 
@@ -237,7 +260,7 @@ class ObdService extends ChangeNotifier {
         ObdSignal.catalystTemp =>
           const Duration(seconds: 15),
         ObdSignal.adapterVoltage => const Duration(seconds: 30),
-        ObdSignal.ethanol => const Duration(seconds: 90),
+        ObdSignal.ethanol || ObdSignal.odometer => const Duration(seconds: 90),
       };
 
   /// The fast group: what the dashboard moves with, and what the instant
@@ -252,7 +275,7 @@ class ObdService extends ChangeNotifier {
     ObdSignal.ambientTemp,
     ObdSignal.catalystTemp,
   ];
-  static const _verySlowSignals = [ObdSignal.ethanol];
+  static const _verySlowSignals = [ObdSignal.ethanol, ObdSignal.odometer];
 
   late ObdLinkState _state;
   String? _detail;
@@ -475,11 +498,18 @@ class ObdService extends ChangeNotifier {
     try {
       reply = await bridge.send(command, timeout: timeout);
     } on ObdBridgeException catch (e) {
+      _log('$command !! ${e.code}');
       _check(generation);
       if (e.code == 'closed' || e.code == 'not_connected' || e.code == 'io') {
         throw _LinkLost('Conexão perdida');
       }
       rethrow;
+    }
+    if (reply.timedOut) {
+      _log('$command -- sem resposta (${reply.millis} ms)');
+    } else {
+      final oneLine = reply.response.split(RegExp('[\r\n]+')).where((l) => l.trim().isNotEmpty).join(' | ');
+      _log('$command => $oneLine (${reply.millis} ms)');
     }
     _check(generation);
     if (reply.timedOut) {
@@ -528,6 +558,13 @@ class ObdService extends ChangeNotifier {
   Future<void> _findEngine(int generation) async {
     await _send('ATH1', generation, timeout: slowCommandTimeout);
     final raw = await _send('0100', generation, timeout: slowCommandTimeout);
+    if (kDebugMode) {
+      // Debug builds: every ECU's whole map, for the log — what else a new
+      // car offers (2026-11-15, the Haval's six ECUs).
+      for (var base = 0x20; base <= 0xE0; base += 0x20) {
+        await _send('01${_hex(base)}', generation, timeout: slowCommandTimeout);
+      }
+    }
     await _send('ATH0', generation, timeout: slowCommandTimeout);
     final engine = raw == null ? null : engineEcuFrom(raw);
     if (engine == null) {
@@ -535,8 +572,24 @@ class ObdService extends ChangeNotifier {
       _info = _info.copyWith(clearEngineEcu: true);
       return;
     }
-    final answer = await _send('ATSH${(engine - 8).toRadixString(16).toUpperCase()}', generation, timeout: slowCommandTimeout);
-    _info = answer != null && answer.toUpperCase().contains('OK') ? _info.copyWith(engineEcu: engine) : _info.copyWith(clearEngineEcu: true);
+    bool ok(String? answer) => answer != null && answer.toUpperCase().contains('OK');
+    final id = engine.toRadixString(16).toUpperCase();
+    final request = (engine - 8).toRadixString(16).toUpperCase();
+    // Addressed alone first (the Nivus), then checked: some cars refuse a
+    // physical mode 01 request — the Haval H6 PHEV answers `7F 01 11`.
+    if (ok(await _send('ATSH$request', generation, timeout: slowCommandTimeout)) && await _carAnswers(generation)) {
+      _info = _info.copyWith(engineEcu: engine, engineByFilter: false);
+      return;
+    }
+    // Functional requests, the adapter keeping only the engine's answers.
+    await _send('ATSH7DF', generation, timeout: slowCommandTimeout);
+    if (ok(await _send('ATCRA$id', generation, timeout: slowCommandTimeout)) && await _carAnswers(generation)) {
+      _info = _info.copyWith(engineEcu: engine, engineByFilter: true);
+      return;
+    }
+    // No filter either: plain functional requests, as with one ECU.
+    await _send('ATAR', generation, timeout: slowCommandTimeout);
+    _info = _info.copyWith(clearEngineEcu: true);
   }
 
   Future<void> _readSupportedPids(int generation) async {
@@ -606,7 +659,7 @@ class ObdService extends ChangeNotifier {
     final pids = [for (final s in signals) obdSignalPids[s]!];
     if (_info.multiPid || pids.length == 1) {
       final command = '01${pids.map(_hex).join()}';
-      final raw = await _send(command, generation);
+      final raw = await _send(command, generation, timeout: _dataTimeout);
       if (raw == null) return null;
       if ((elmError(raw) ?? '').toUpperCase().contains('NO DATA')) return false;
       final values = mode01Values(raw, pids, command: command);
@@ -622,7 +675,7 @@ class ObdService extends ChangeNotifier {
     bool? answered;
     for (final pid in pids) {
       final command = '01${_hex(pid)}';
-      final raw = await _send(command, generation);
+      final raw = await _send(command, generation, timeout: _dataTimeout);
       if (raw == null) continue;
       if ((elmError(raw) ?? '').toUpperCase().contains('NO DATA')) {
         answered ??= false;
@@ -658,8 +711,16 @@ class ObdService extends ChangeNotifier {
     _readingsController.add(_readings);
   }
 
+  /// Debug builds only: every command and answer, and every state change, to
+  /// logcat with the `OBD` prefix — to follow a run on a new car live over
+  /// USB (`adb logcat -s flutter`). Release builds log nothing.
+  static void _log(String line) {
+    if (kDebugMode) debugPrintSynchronously('OBD $line');
+  }
+
   void _setState(ObdLinkState state, {String? detail}) {
     if (_state == state && _detail == detail) return;
+    _log('estado: ${state.name}${detail == null ? '' : ' ($detail)'}');
     _state = state;
     _detail = detail;
     _history.add(ObdTransition(_now(), state, detail));

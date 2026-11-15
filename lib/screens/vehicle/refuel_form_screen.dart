@@ -3,7 +3,9 @@ import 'package:flutter/material.dart';
 import '../../models/refuel_record.dart';
 import '../../models/vehicle_profile.dart';
 import '../../services/fuel_consumption.dart';
+import '../../services/driving_session_host.dart';
 import '../../services/hybrid_consumption.dart';
+import '../../services/obd/obd_odometer.dart';
 import '../../services/vehicle_repository.dart';
 import 'charge_form_screen.dart';
 import 'vehicle_profile_screen.dart';
@@ -36,6 +38,8 @@ class _RefuelFormScreenState extends State<RefuelFormScreen> {
   FuelType? _fuel;
   double? _suggestion;
   double _appKmSinceLast = 0;
+  DateTime? _odometerFromObdAt;
+  bool _checkedObd = false;
   bool _usedFuel = false;
   late final TextEditingController _rangeBefore;
   late final TextEditingController _rangeAfter;
@@ -64,6 +68,19 @@ class _RefuelFormScreenState extends State<RefuelFormScreen> {
     _rangeAfter = TextEditingController(text: editableNumber(editing?.panelFuelRangeAfterKm));
     _liters.addListener(_onAmountsChanged);
     _price.addListener(_onAmountsChanged);
+  }
+
+  /// A new record with the adapter connected: the car's own odometer
+  /// (2026-11-15, owner request — the Haval reports it), over the suggestion.
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_checkedObd || widget.editing != null) return;
+    _checkedObd = true;
+    final read = obdOdometerForForm(DrivingSessionScope.maybeOf(context)?.obd);
+    if (read == null) return;
+    _odometer.text = editableNumber(read.km);
+    _odometerFromObdAt = read.at;
   }
 
   @override
@@ -237,10 +254,12 @@ class _RefuelFormScreenState extends State<RefuelFormScreen> {
                   suffixText: 'km',
                   border: const OutlineInputBorder(),
                   helperMaxLines: 3,
-                  helperText: suggestion == null
-                      ? 'Digite o valor que aparece no painel do carro.'
-                      : 'Sugestão: último registro + ${formatKm(_appKmSinceLast)} registrados pelo app. '
-                          'Confira no painel do carro.',
+                  helperText: _odometerFromObdAt != null
+                      ? obdOdometerHelper(_odometerFromObdAt!)
+                      : suggestion == null
+                          ? 'Digite o valor que aparece no painel do carro.'
+                          : 'Sugestão: último registro + ${formatKm(_appKmSinceLast)} registrados pelo app. '
+                              'Confira no painel do carro.',
                 ),
                 keyboardType: TextInputType.number,
                 validator: _validateOdometer,

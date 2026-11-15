@@ -129,6 +129,17 @@ void main() {
       await unmount(tester, service);
     });
 
+    testWidgets('accelerator on a car without the pedal (Haval): the throttle alone', (tester) async {
+      car.gearbox.bitmaps[0x40] = [0xE0, 0x80, 0x00, 0x00];
+      car.engine.bitmaps[0x40] = [0xFE, 0x50, 0xC0, 0x00]; // 49 cleared
+      final service = await mount(tester, SensorType.accelerator);
+      expect(service.supports(ObdSignal.pedal), isFalse);
+      expect(line(tester, 'Acelerador'), '16 %');
+      expect(find.byKey(const ValueKey('obdPanel_Pedal')), findsNothing);
+      expect(find.byType(ObdScaleBar), findsOneWidget);
+      await unmount(tester, service);
+    });
+
     testWidgets('consumption: asks for the displacement on a car without MAF, then estimates', (tester) async {
       await tester.runAsync(() => profile());
       var service = await mount(tester, SensorType.fuelConsumption);

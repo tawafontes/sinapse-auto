@@ -149,7 +149,7 @@ List<String> troubleCodes(String raw, int responseByte) {
 int? mode01DataLength(int pid) {
   if (pid % 0x20 == 0) return 4; // the "supported PIDs" bitmaps
   return switch (pid) {
-    0x01 || 0x41 || 0x4F || 0x50 => 4,
+    0x01 || 0x41 || 0x4F || 0x50 || 0xA6 => 4,
     0x03 || 0x0C || 0x10 || 0x1F || 0x21 || 0x22 || 0x23 || 0x31 || 0x32 || 0x42 || 0x43 || 0x44 || 0x4D || 0x4E => 2,
     >= 0x14 && <= 0x1B => 2,
     >= 0x3C && <= 0x3F => 2,
@@ -199,6 +199,8 @@ double? mode01Physical(int pid, List<int> d) {
     0x10 => ab / 100,
     0x3C => ab / 10 - 40,
     0x42 => ab / 1000,
+    // The odometer: four bytes, 0.1 km.
+    0xA6 when d.length >= 4 => ((d[0] << 24) | (d[1] << 16) | (d[2] << 8) | d[3]) / 10,
     _ => null,
   };
 }

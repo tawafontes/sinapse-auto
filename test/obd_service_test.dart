@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:hive/hive.dart';
 import 'package:synapse_auto/services/hive_boxes.dart';
 import 'package:synapse_auto/services/obd/elm327_decode.dart';
+import 'package:synapse_auto/services/obd/obd_odometer.dart';
 import 'package:synapse_auto/services/obd/obd_preferences.dart';
 import 'package:synapse_auto/services/obd/obd_service.dart';
 
@@ -87,7 +88,8 @@ void main() {
       expect(service.info.elmVersion, 'ELM327 v2.3');
       expect(service.info.protocol, 'A6');
       expect(service.info.supportedPids, nivusEngine, reason: 'only the engine\'s map, never the other ECU\'s');
-      expect(car.sent, isNot(contains('0160')), reason: 'not announced by 0140');
+      // (Debug builds also dump every ECU's maps before choosing the engine.)
+      expect(car.sent.skip(car.sent.indexOf('ATSH7E0')), isNot(contains('0160')), reason: 'the engine map walk stops where 0140 says');
 
       await tester.pump(const Duration(seconds: 2));
       expect(car.sent, contains('010C040D11490B'), reason: 'the fast group in one request: rpm, load, speed, throttle, pedal, MAP (no MAF)');
@@ -209,6 +211,55 @@ void main() {
       for (final (gap, wanted) in [for (var i = 0; i < 4; i++) (gaps[i], [15, 30, 60, 60][i])]) {
         expect(gap, inInclusiveRange(wanted, wanted + 1));
       }
+      await finish(tester);
+    });
+
+    testWidgets('a car refusing the engine alone (Haval): functional requests filtered to the engine', (tester) async {
+      // The Haval H6 PHEV, 2026-11-15: six ECUs answer 7DF, but 0100 sent to
+      // 7E0 alone gets 7F 01 11 — the first build read no PID at all.
+      car.refusesPhysicalMode01 = true;
+      await start(tester);
+      await tester.pump(const Duration(seconds: 5));
+      expect(service.state, ObdLinkState.receiving);
+      expect(car.sent, containsAllInOrder(['ATSH7E0', '0100', 'ATSH7DF', 'ATCRA7E8', '0100']));
+      expect(service.info.engineEcu, 0x7E8);
+      expect(service.info.engineByFilter, isTrue);
+      expect(service.info.supportedPids, nivusEngine, reason: 'only the engine map, through the filter');
+      expect(service.readings[ObdSignal.rpm]!.value, 982);
+      expect(service.readings[ObdSignal.coolant]!.value, 81);
+      await finish(tester);
+    });
+
+    testWidgets('the odometer, on a car that reports it, for the refuel forms', (tester) async {
+      car.reportOdometer();
+      await start(tester);
+      await tester.pump(const Duration(seconds: 5));
+      expect(service.supports(ObdSignal.odometer), isTrue);
+      expect(service.readings[ObdSignal.odometer]!.value, closeTo(23456.7, 1e-6));
+      final now = tester.binding.clock.now();
+      expect(obdOdometerForForm(service, now: now)!.km, 23457, reason: 'whole km, as the panel shows');
+      expect(obdOdometerForForm(service, now: now.add(const Duration(minutes: 31))), isNull, reason: 'too old');
+      expect(obdOdometerForForm(null), isNull);
+      await finish(tester);
+    });
+
+    testWidgets('the Nivus has no odometer: nothing to fill', (tester) async {
+      await start(tester);
+      await tester.pump(const Duration(seconds: 5));
+      expect(service.supports(ObdSignal.odometer), isFalse);
+      expect(obdOdometerForForm(service, now: tester.binding.clock.now()), isNull);
+      await finish(tester);
+    });
+
+    testWidgets('through the filter, slow answers (900 ms) do not lose the link', (tester) async {
+      // The Haval drifted to ~475 ms and past 500: a false "link lost".
+      car = FakeObdCar(latency: const Duration(milliseconds: 900))..refusesPhysicalMode01 = true;
+      await start(tester);
+      await tester.pump(const Duration(seconds: 20));
+      await tester.pump(const Duration(seconds: 20));
+      expect(service.info.engineByFilter, isTrue);
+      expect(service.state, ObdLinkState.receiving);
+      expect(service.isFresh(ObdSignal.rpm), isTrue);
       await finish(tester);
     });
 

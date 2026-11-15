@@ -35,7 +35,8 @@ final _traces = Expando<_ConsumptionTrace>('obdConsumption');
 /// * Temperaturas — engine (coolant; it replaced the engine temperature card
 ///   on 2026-11-15), intake, ambient and catalyst, each on its own colour
 ///   scale; maximized, the intake manifold pressure too;
-/// * Acelerador — the throttle and the pedal as two vertical bars;
+/// * Acelerador — the throttle and the pedal as two vertical bars (the
+///   throttle alone on a car that does not report the pedal);
 /// * Consumo instantâneo — km/L moving (L/h stopped) in big figures and a
 ///   chart of the last minutes ([estimateConsumption]); maximized, the
 ///   window's average and the basis of the estimate.
@@ -382,7 +383,7 @@ class _ObdPanelViewState extends State<ObdPanelView> {
       _scaleRow(theme, 'Admissão', _read(ObdSignal.intakeTemp), '°C', -10, 80, ObdScales.intake),
       _scaleRow(theme, 'Ambiente', _read(ObdSignal.ambientTemp), '°C', -10, 50, ObdScales.ambient),
       _scaleRow(theme, 'Catalisador', _read(ObdSignal.catalystTemp), '°C', 0, 1000, ObdScales.catalyst),
-      if (widget.fullscreen) _scaleRow(theme, 'Coletor de admissão', _read(ObdSignal.manifoldPressure), 'kPa', 10, 130, ObdScales.manifold),
+      if (widget.fullscreen) _scaleRow(theme, 'Coletor de admissão', _read(ObdSignal.manifoldPressure), 'kPa', 10, 250, ObdScales.manifold),
     ];
     return Column(
       mainAxisAlignment: MainAxisAlignment.spaceEvenly,
@@ -406,7 +407,13 @@ class _ObdPanelViewState extends State<ObdPanelView> {
             ],
           ),
         );
-    return Row(children: [pedal('Acelerador', _read(ObdSignal.throttle)), pedal('Pedal', _read(ObdSignal.pedal))]);
+    // A car that does not report the pedal (the Haval H6 PHEV) gets the
+    // throttle alone, not an empty bar that reads as zero.
+    final noPedal = !widget.preview && widget.service?.supports(ObdSignal.pedal) == false;
+    return Row(children: [
+      pedal('Acelerador', _read(ObdSignal.throttle)),
+      if (!noPedal) pedal('Pedal', _read(ObdSignal.pedal)),
+    ]);
   }
 
   Widget _consumptionBody(ThemeData theme, bool stale) {

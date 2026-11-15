@@ -48,9 +48,10 @@ abstract final class ObdScales {
   /// Engine load and pedal %.
   static const load = <ObdColorStop>[(0, obdGreen), (55, obdGreen), (75, obdOrange), (95, obdRed)];
 
-  /// Intake manifold kPa: vacuum (light load) green, near atmospheric orange,
-  /// boost red.
-  static const manifold = <ObdColorStop>[(20, obdGreen), (60, obdGreen), (95, obdOrange), (130, obdRed)];
+  /// Intake manifold kPa: vacuum (light load) green, atmospheric amber, turbo
+  /// boost blue — boost is normal on a turbo engine, not an alarm (the Haval
+  /// H6 PHEV reached 206 kPa, 2026-11-15).
+  static const manifold = <ObdColorStop>[(20, obdGreen), (70, obdGreen), (100, Color(0xFFFFB300)), (130, obdBlue), (250, obdBlue)];
 
   /// 12 V system volts.
   static const battery = <ObdColorStop>[(10.5, obdRed), (11.8, obdRed), (12.2, obdOrange), (12.4, obdGreen), (14.8, obdGreen), (15.2, obdOrange), (15.8, obdRed)];
