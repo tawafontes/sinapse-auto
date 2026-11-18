@@ -55,6 +55,15 @@ enum SensorType {
   accelerator,
   fuelConsumption,
 
+  /// OBD-II, from the Haval H6 PHEV (2026-11-15), bytes 14-17: the
+  /// high-voltage battery's charge; the energy flow in/out of it (kW); the
+  /// drive mode (electric or engine) and the electric share of the drive;
+  /// the turbo boost.
+  hybridBattery,
+  energyFlow,
+  driveMode,
+  turboBoost,
+
   /// Sentinel returned by [SensorTypeAdapter.read] for a stored byte that
   /// doesn't match any case above. Never chosen by the user or written back
   /// to Hive — see [SensorWidgetRepository.discardUnknownSensors].
@@ -100,6 +109,14 @@ class SensorTypeAdapter extends TypeAdapter<SensorType> {
         return SensorType.accelerator;
       case 13:
         return SensorType.fuelConsumption;
+      case 14:
+        return SensorType.hybridBattery;
+      case 15:
+        return SensorType.energyFlow;
+      case 16:
+        return SensorType.driveMode;
+      case 17:
+        return SensorType.turboBoost;
       default:
         return SensorType.unknown;
     }
@@ -143,6 +160,18 @@ class SensorTypeAdapter extends TypeAdapter<SensorType> {
         break;
       case SensorType.fuelConsumption:
         writer.writeByte(13);
+        break;
+      case SensorType.hybridBattery:
+        writer.writeByte(14);
+        break;
+      case SensorType.energyFlow:
+        writer.writeByte(15);
+        break;
+      case SensorType.driveMode:
+        writer.writeByte(16);
+        break;
+      case SensorType.turboBoost:
+        writer.writeByte(17);
         break;
       case SensorType.unknown:
         throw ArgumentError('SensorType.unknown must never be persisted');

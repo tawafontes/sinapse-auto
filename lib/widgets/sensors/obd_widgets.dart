@@ -19,6 +19,10 @@ const Map<SensorType, ObdSignal> obdSignalForSensor = {
   SensorType.engineTemperatures: ObdSignal.intakeTemp,
   SensorType.accelerator: ObdSignal.throttle,
   SensorType.fuelConsumption: ObdSignal.rpm,
+  SensorType.hybridBattery: ObdSignal.hybridBattery,
+  SensorType.energyFlow: ObdSignal.hvVoltage,
+  SensorType.driveMode: ObdSignal.rpm,
+  SensorType.turboBoost: ObdSignal.baro,
 };
 
 /// What an OBD widget says instead of a value (owner decision, 2026-11-11:

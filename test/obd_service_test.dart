@@ -94,7 +94,7 @@ void main() {
       await tester.pump(const Duration(seconds: 2));
       expect(car.sent, contains('010C040D11490B'), reason: 'the fast group in one request: rpm, load, speed, throttle, pedal, MAP (no MAF)');
       expect(car.sent, contains('0105422F0F463C'), reason: 'coolant, module voltage, fuel level, intake, ambient, catalyst');
-      expect(car.sent, contains('0152'), reason: 'the ethanol share, on its own');
+      expect(car.sent, contains('015233'), reason: 'the ethanol share with the barometric pressure, every 30 s');
       expect(car.sent.where((c) => c.startsWith('04')), isEmpty, reason: 'never clears codes');
       expect(service.readings[ObdSignal.rpm]!.value, 982);
       expect(service.readings[ObdSignal.coolant]!.value, 81);
@@ -240,6 +240,68 @@ void main() {
       expect(obdOdometerForForm(service, now: now)!.km, 23457, reason: 'whole km, as the panel shows');
       expect(obdOdometerForForm(service, now: now.add(const Duration(minutes: 31))), isNull, reason: 'too old');
       expect(obdOdometerForForm(null), isNull);
+      await finish(tester);
+    });
+
+    testWidgets('the Haval: the hybrid ECU found, its battery and pedal read through the filter', (tester) async {
+      car.haval();
+      await start(tester);
+      await tester.pump(const Duration(seconds: 6));
+      expect(service.state, ObdLinkState.receiving);
+      expect(service.info.hybridEcu, 0x7EB);
+      expect(service.supports(ObdSignal.pedal), isTrue, reason: 'from the hybrid ECU');
+      expect(service.readings[ObdSignal.pedal]!.value.round(), 18);
+      expect(service.readings[ObdSignal.hybridBattery]!.value.round(), 64);
+      expect(service.readings[ObdSignal.hvVoltage]!.value, closeTo(362, 0.05));
+      expect(service.readings[ObdSignal.hvCurrent]!.value, closeTo(24, 0.05));
+      expect(service.readings[ObdSignal.baro]!.value, 94);
+      expect(car.sent, containsAllInOrder(['ATCRA7EB', '01495B9A', 'ATCRA7E8']), reason: 'to the hybrid ECU and back');
+      expect(service.readings[ObdSignal.rpm]!.value, 982, reason: 'the engine still polled');
+
+      // Charging: a negative current.
+      car.hvAmps = -15.5;
+      await tester.pump(const Duration(seconds: 2));
+      expect(service.readings[ObdSignal.hvCurrent]!.value, closeTo(-15.5, 0.05));
+      await finish(tester);
+    });
+
+    testWidgets('a switched-off Haval with modules still awake is off, until the engine answers', (tester) async {
+      // 2026-11-15: with the car off, 7EC/7ED/7EF went on answering; the app
+      // took 7EC for the engine and showed "receiving" with the car off.
+      car.haval();
+      car.offEcus.add(FakeEcu(responseId: 0x7EC, bitmaps: {
+        0x00: [0xD8, 0x18, 0x80, 0x01],
+        0x20: [0x00, 0x00, 0x00, 0x01],
+        0x40: [0xC0, 0x00, 0x00, 0x00],
+      }));
+      car.ignition = FakeIgnition.off;
+      await start(tester);
+      await tester.pump(const Duration(seconds: 15));
+      expect(service.state, ObdLinkState.waitingForCar);
+      expect(service.detail, contains('Motor não responde'));
+      expect(service.info.engineEcu, isNot(0x7EC));
+
+      car.ignition = FakeIgnition.running;
+      await tester.pump(const Duration(seconds: 10));
+      expect(service.state, ObdLinkState.receiving);
+      expect(service.info.engineEcu, 0x7E8);
+      expect(service.readings[ObdSignal.rpm]!.value, 982);
+      await finish(tester);
+    });
+
+    testWidgets('the drive split: electric while the engine is off, engine when it runs', (tester) async {
+      car.haval();
+      car.ignition = FakeIgnition.on;
+      await start(tester);
+      await tester.pump(const Duration(seconds: 6));
+      car.speedKmh = 36; // 10 m/s
+      await tester.pump(const Duration(seconds: 20));
+      car.ignition = FakeIgnition.running;
+      await tester.pump(const Duration(seconds: 10));
+      final trip = service.trip;
+      expect(trip.electricKm, closeTo(0.2, 0.02));
+      expect(trip.engineKm, closeTo(0.1, 0.02));
+      expect(trip.electricShare, closeTo(2 / 3, 0.05));
       await finish(tester);
     });
 

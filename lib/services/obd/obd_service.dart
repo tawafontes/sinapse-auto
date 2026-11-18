@@ -3,6 +3,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 
+import 'diagnostic/diagnostic_policy.dart';
 import 'elm327_decode.dart';
 import 'obd_bridge.dart';
 import 'obd_preferences.dart';
@@ -56,6 +57,15 @@ enum ObdSignal {
   /// Haval H6 PHEV does, the Nivus does not) — fills the refuel and recharge
   /// forms.
   odometer,
+
+  /// 2026-11-15, from the Haval H6 PHEV: the barometric pressure (turbo boost
+  /// = manifold - barometric), and from the hybrid ECU (7EB on the Haval)
+  /// the high-voltage battery's charge (PID 5B) and its voltage and current
+  /// (PID 9A).
+  baro,
+  hybridBattery,
+  hvVoltage,
+  hvCurrent,
 }
 
 /// The mode 01 PID behind each [ObdSignal] (`adapterVoltage` is `ATRV`).
@@ -74,6 +84,10 @@ const Map<ObdSignal, int> obdSignalPids = {
   ObdSignal.manifoldPressure: 0x0B,
   ObdSignal.pedal: 0x49,
   ObdSignal.odometer: 0xA6,
+  ObdSignal.baro: 0x33,
+  ObdSignal.hybridBattery: 0x5B,
+  ObdSignal.hvVoltage: 0x9A,
+  ObdSignal.hvCurrent: 0x9A,
   ObdSignal.maf: 0x10,
 };
 
@@ -101,6 +115,30 @@ class ObdReadings {
 }
 
 /// What the link learned about the adapter and the car.
+/// One drive split by what moved the car: the engine off (electric, on a
+/// hybrid) or on.
+@immutable
+class ObdDriveTrip {
+  const ObdDriveTrip({this.electricKm = 0, this.engineKm = 0, this.electricTime = Duration.zero, this.engineTime = Duration.zero});
+
+  final double electricKm;
+  final double engineKm;
+  final Duration electricTime;
+  final Duration engineTime;
+
+  double get totalKm => electricKm + engineKm;
+
+  /// The electric share of the distance, 0-1; `null` before any.
+  double? get electricShare => totalKm < 0.01 ? null : electricKm / totalKm;
+
+  ObdDriveTrip copyWith({double? electricKm, double? engineKm, Duration? electricTime, Duration? engineTime}) => ObdDriveTrip(
+        electricKm: electricKm ?? this.electricKm,
+        engineKm: engineKm ?? this.engineKm,
+        electricTime: electricTime ?? this.electricTime,
+        engineTime: engineTime ?? this.engineTime,
+      );
+}
+
 @immutable
 class ObdLinkInfo {
   const ObdLinkInfo({
@@ -110,6 +148,8 @@ class ObdLinkInfo {
     this.protocol,
     this.engineEcu,
     this.engineByFilter = false,
+    this.hybridEcu,
+    this.hybridPids,
     this.supportedPids,
     this.multiPid = true,
   });
@@ -132,6 +172,14 @@ class ObdLinkInfo {
   /// mode 01 request (`7F 01 11`, 2026-11-15) but answers a functional one.
   final bool engineByFilter;
 
+  /// A second ECU with the hybrid system's PIDs (the high-voltage battery,
+  /// the pedal) - 7EB on the Haval H6 PHEV - read through the adapter's
+  /// filter once a second; `null` on a car without one (the Nivus).
+  final int? hybridEcu;
+
+  /// The mode 01 PIDs [hybridEcu] declares.
+  final Set<int>? hybridPids;
+
   /// The mode 01 PIDs the engine declares; `null` until the car first answered.
   final Set<int>? supportedPids;
 
@@ -145,6 +193,9 @@ class ObdLinkInfo {
     String? protocol,
     int? engineEcu,
     bool? engineByFilter,
+    int? hybridEcu,
+    Set<int>? hybridPids,
+    bool clearHybridEcu = false,
     bool clearEngineEcu = false,
     Set<int>? supportedPids,
     bool? multiPid,
@@ -156,6 +207,8 @@ class ObdLinkInfo {
         protocol: protocol ?? this.protocol,
         engineEcu: clearEngineEcu ? null : (engineEcu ?? this.engineEcu),
         engineByFilter: clearEngineEcu ? false : (engineByFilter ?? this.engineByFilter),
+        hybridEcu: clearHybridEcu ? null : (hybridEcu ?? this.hybridEcu),
+        hybridPids: clearHybridEcu ? null : (hybridPids ?? this.hybridPids),
         supportedPids: supportedPids ?? this.supportedPids,
         multiPid: multiPid ?? this.multiPid,
       );
@@ -178,6 +231,79 @@ class _LinkLost implements Exception {
 
 class _Cancelled implements Exception {
   const _Cancelled();
+}
+
+/// A diagnostic report cannot start: the link is not where it needs to be
+/// ([reason], in Portuguese, for the "Executar" button).
+class DiagnosticUnavailable implements Exception {
+  const DiagnosticUnavailable(this.reason);
+  final String reason;
+
+  @override
+  String toString() => 'DiagnosticUnavailable: $reason';
+}
+
+/// The link dropped (or was closed) while a diagnostic report ran: the report
+/// keeps what it read and ends incomplete.
+class DiagnosticLinkLost implements Exception {
+  const DiagnosticLinkLost(this.reason);
+  final String reason;
+
+  @override
+  String toString() => 'DiagnosticLinkLost: $reason';
+}
+
+/// One command a report sent and what came back (`null`: no answer in time).
+typedef DiagnosticExchange = ({String command, String? response});
+
+/// What a diagnostic report gets while it runs: the link, for a moment its
+/// own (polling waits). Every command goes through [DiagnosticCommandPolicy]
+/// first, and is kept in [exchanges] — the raw answers a saved report stores.
+class DiagnosticLink {
+  DiagnosticLink._(this._service, this._generation);
+
+  final ObdService _service;
+  final int _generation;
+  bool _clearing = false;
+
+  final List<DiagnosticExchange> exchanges = [];
+
+  ObdLinkInfo get info => _service.info;
+  ObdLinkState get state => _service.state;
+
+  /// The service's clock (the fake one, in tests).
+  DateTime now() => _service._now();
+
+  Future<String?> send(String command, {Duration timeout = const Duration(seconds: 2)}) async {
+    DiagnosticCommandPolicy.check(command, clearingEngine: _clearing);
+    final response = await _service._send(command, _generation, timeout: timeout);
+    exchanges.add((command: command, response: response));
+    return response;
+  }
+
+  /// Mode 04 to the engine alone (its physical address, headers on), the only
+  /// write the app makes; the caller has checked the car is stopped with the
+  /// engine off. `null`: no engine found, nothing sent.
+  Future<String?> clearEngineCodes() async {
+    final engine = info.engineEcu;
+    if (engine == null) return null;
+    await send('ATAR');
+    await send('ATH1');
+    await send('ATSH${(engine - 8).toRadixString(16).toUpperCase()}');
+    _clearing = true;
+    try {
+      return await send('04', timeout: const Duration(seconds: 5));
+    } finally {
+      _clearing = false;
+    }
+  }
+}
+
+class _DiagnosticJob {
+  _DiagnosticJob(this.run, this.fail);
+
+  final Future<void> Function(int generation) run;
+  final void Function(String reason) fail;
 }
 
 /// The single owner of the OBD-II link (phase 1). Lives in the
@@ -261,6 +387,8 @@ class ObdService extends ChangeNotifier {
           const Duration(seconds: 15),
         ObdSignal.adapterVoltage => const Duration(seconds: 30),
         ObdSignal.ethanol || ObdSignal.odometer => const Duration(seconds: 90),
+        ObdSignal.baro => const Duration(seconds: 90),
+        ObdSignal.hybridBattery || ObdSignal.hvVoltage || ObdSignal.hvCurrent => const Duration(seconds: 4),
       };
 
   /// The fast group: what the dashboard moves with, and what the instant
@@ -275,7 +403,12 @@ class ObdService extends ChangeNotifier {
     ObdSignal.ambientTemp,
     ObdSignal.catalystTemp,
   ];
-  static const _verySlowSignals = [ObdSignal.ethanol, ObdSignal.odometer];
+  static const _verySlowSignals = [ObdSignal.ethanol, ObdSignal.odometer, ObdSignal.baro];
+
+  /// Read from the hybrid ECU once a second: the pedal (when the engine does
+  /// not report it), the battery's charge, its voltage and current.
+  static const _hybridSignals = [ObdSignal.pedal, ObdSignal.hybridBattery, ObdSignal.hvVoltage];
+  static const hybridPeriod = Duration(seconds: 1);
 
   late ObdLinkState _state;
   String? _detail;
@@ -321,7 +454,108 @@ class ObdService extends ChangeNotifier {
     final linkOk = signal == ObdSignal.adapterVoltage
         ? _state == ObdLinkState.receiving || _state == ObdLinkState.waitingForCar
         : _state == ObdLinkState.receiving;
-    return linkOk && _now().difference(sample.at) <= maxAge(signal);
+    // A diagnostic report holds the link: polling waits on purpose, and the
+    // widgets keep their last value without the red border.
+    return linkOk && (_diagnosing || _now().difference(sample.at) <= maxAge(signal));
+  }
+
+  /// Whether a diagnostic report holds the link right now.
+  bool get diagnosing => _diagnosing;
+  bool _diagnosing = false;
+  _DiagnosticJob? _job;
+
+  /// Why a diagnostic report cannot run now, or `null` when it can.
+  /// [needsCar]: the car must answer (most reports); without it, the adapter
+  /// answering is enough (the battery's rest and cranking steps).
+  String? diagnosticUnavailableReason({bool needsCar = true}) {
+    if (_job != null || _diagnosing) return 'Outro diagnóstico em andamento';
+    return switch (_state) {
+      ObdLinkState.noAdapter => 'Escolha o adaptador em Veículo → Adaptador OBD-II',
+      ObdLinkState.off => 'Conecte o adaptador',
+      ObdLinkState.connecting || ObdLinkState.reconnecting => 'Aguarde a conexão com o adaptador',
+      ObdLinkState.waitingForCar => needsCar ? 'Ligue a ignição' : null,
+      ObdLinkState.receiving => null,
+    };
+  }
+
+  /// Runs [body] with the link to itself: polling pauses at its next turn,
+  /// [body] talks through a [DiagnosticLink], then the addressing polling
+  /// needs is restored (always, unless the link dropped) and polling goes on.
+  /// Fails with [DiagnosticUnavailable] when it cannot start, and with
+  /// [DiagnosticLinkLost] when the link drops meanwhile.
+  Future<T> runDiagnostic<T>(Future<T> Function(DiagnosticLink link) body, {bool needsCar = true}) {
+    final reason = _disposed ? 'Serviço encerrado' : diagnosticUnavailableReason(needsCar: needsCar);
+    if (reason != null) return Future.error(DiagnosticUnavailable(reason));
+    final completer = Completer<T>();
+    _job = _DiagnosticJob((generation) async {
+      final link = DiagnosticLink._(this, generation);
+      var lost = false;
+      _diagnosing = true;
+      notifyListeners();
+      try {
+        final result = await body(link);
+        completer.complete(result);
+      } on _LinkLost catch (e) {
+        lost = true;
+        completer.completeError(DiagnosticLinkLost(e.reason));
+        rethrow;
+      } on _Cancelled {
+        lost = true;
+        completer.completeError(const DiagnosticLinkLost('Conexão encerrada'));
+        rethrow;
+      } catch (e, st) {
+        completer.completeError(e, st);
+      } finally {
+        _diagnosing = false;
+        if (!_disposed) notifyListeners();
+        if (!lost) await _restoreAddressing(generation);
+      }
+    }, (reason) {
+      if (!completer.isCompleted) completer.completeError(DiagnosticLinkLost(reason));
+    });
+    _wake();
+    return completer.future;
+  }
+
+  void _failJob(String reason) {
+    final job = _job;
+    _job = null;
+    job?.fail(reason);
+  }
+
+  /// Runs the queued diagnostic, if any: `true` when one ran.
+  Future<bool> _serveDiagnostic(int generation) async {
+    final job = _job;
+    if (job == null) return false;
+    _job = null;
+    await job.run(generation);
+    return true;
+  }
+
+  /// Back to what polling expects after a report changed the addressing:
+  /// headers off, every ECU heard, then the engine reached as [_findEngine]
+  /// chose.
+  Future<void> _restoreAddressing(int generation) async {
+    String id(int v) => v.toRadixString(16).toUpperCase();
+    await _send('ATAR', generation, timeout: slowCommandTimeout);
+    await _send('ATH0', generation, timeout: slowCommandTimeout);
+    final engine = _info.engineEcu;
+    if (engine == null) {
+      await _send('ATSH7DF', generation, timeout: slowCommandTimeout);
+    } else if (_info.engineByFilter) {
+      await _send('ATSH7DF', generation, timeout: slowCommandTimeout);
+      await _send('ATCRA${id(engine)}', generation, timeout: slowCommandTimeout);
+    } else {
+      await _send('ATSH${id(engine - 8)}', generation, timeout: slowCommandTimeout);
+    }
+  }
+
+  /// Cuts a wait short (a diagnostic was queued).
+  void _wake() {
+    _sleepTimer?.cancel();
+    _sleepTimer = null;
+    final completer = _sleepCompleter;
+    if (completer != null && !completer.isCompleted) completer.complete();
   }
 
   /// Whether the car reports [signal]: `null` until its PID map is known.
@@ -329,8 +563,15 @@ class ObdService extends ChangeNotifier {
     if (signal == ObdSignal.adapterVoltage) return true;
     final pids = _info.supportedPids;
     if (pids == null) return null;
-    return pids.contains(obdSignalPids[signal]);
+    final pid = obdSignalPids[signal];
+    return pids.contains(pid) || (_info.hybridPids?.contains(pid) ?? false);
   }
+
+  /// The drive so far - distance and time with the engine off (electric) and
+  /// on - since the car last started answering. Meaningful on a hybrid.
+  ObdDriveTrip get trip => _trip;
+  ObdDriveTrip _trip = const ObdDriveTrip();
+  DateTime? _lastMotion;
 
   /// The app opened or came back to the foreground: connect if the user wants
   /// it automatic and did not disconnect by hand.
@@ -398,6 +639,7 @@ class ObdService extends ChangeNotifier {
   void _stop() {
     _running = false;
     _generation++;
+    _failJob('Conexão encerrada');
     _sleepTimer?.cancel();
     _sleepTimer = null;
     final completer = _sleepCompleter;
@@ -431,6 +673,7 @@ class ObdService extends ChangeNotifier {
         return;
       } on _LinkLost catch (lost) {
         if (!_alive(generation)) return;
+        _failJob(lost.reason);
         if (_state == ObdLinkState.receiving || _state == ObdLinkState.waitingForCar) connectedOnce = true;
         try {
           await bridge.disconnect();
@@ -481,9 +724,21 @@ class ObdService extends ChangeNotifier {
         _setState(ObdLinkState.waitingForCar, detail: 'Carro desligado ou sem resposta');
         await _waitForCar(generation);
       }
-      await _findEngine(generation);
+      if (!await _findEngine(generation)) {
+        // Only small ECUs answer: the car is off and some module is still
+        // awake (the Haval's battery and charger, for minutes after it is
+        // switched off). Waiting, until the engine answers too.
+        _setState(ObdLinkState.waitingForCar, detail: 'Motor não responde (carro desligado)');
+        await _serveDiagnostic(generation);
+        await _sleep(waitingPeriod, generation);
+        continue;
+      }
       await _readSupportedPids(generation);
       _reconnectAttempt = 0;
+      // A new drive when the car comes back after being off (not after a
+      // dropped link, which is the same drive).
+      if (_state == ObdLinkState.waitingForCar || _state == ObdLinkState.connecting) _trip = const ObdDriveTrip();
+      _lastMotion = null;
       _setState(ObdLinkState.receiving);
       await _poll(generation);
       // The car went quiet (ignition off): back to waiting, link still up.
@@ -544,6 +799,7 @@ class ObdService extends ChangeNotifier {
   Future<void> _waitForCar(int generation) async {
     var sinceVoltage = Duration.zero;
     while (true) {
+      await _serveDiagnostic(generation);
       await _sleep(waitingPeriod, generation);
       sinceVoltage += waitingPeriod;
       if (sinceVoltage >= voltagePeriod) {
@@ -555,23 +811,50 @@ class ObdService extends ChangeNotifier {
   }
 
   /// Finds the engine among the ECUs that answer and addresses it alone.
-  Future<void> _findEngine(int generation) async {
+  /// The fewest mode 01 PIDs an engine ECU declares: the Nivus' engine declares 39, the Haval's 40; the ECUs that
+  /// stay awake on a switched-off Haval (battery, charger) 9, the Nivus'
+  /// gearbox 10. Fewer: the car is off and a module is still awake.
+  static const engineMinPids = 15;
+
+  /// Finds the engine among the ECUs that answer and how to reach it alone;
+  /// `false` when the ECUs that answer are all too small to be an engine.
+  Future<bool> _findEngine(int generation) async {
+    // Every ECU must be heard: a filter left from before the car went quiet
+    // (ATCRA7E8 on the Haval) would hide all but the engine.
+    await _send('ATAR', generation, timeout: slowCommandTimeout);
+    await _send('ATSH7DF', generation, timeout: slowCommandTimeout);
     await _send('ATH1', generation, timeout: slowCommandTimeout);
     final raw = await _send('0100', generation, timeout: slowCommandTimeout);
-    if (kDebugMode) {
-      // Debug builds: every ECU's whole map, for the log — what else a new
-      // car offers (2026-11-15, the Haval's six ECUs).
-      for (var base = 0x20; base <= 0xE0; base += 0x20) {
-        await _send('01${_hex(base)}', generation, timeout: slowCommandTimeout);
-      }
+    // Every ECU's whole map (headers on): which one is the hybrid system.
+    final maps = <int, Set<int>>{};
+    void addMaps(String? answer, int base) {
+      if (answer == null) return;
+      canSingleFrames(answer).forEach((id, data) {
+        if (data.length < 6 || data[0] != 0x41 || data[1] != base) return;
+        final set = maps.putIfAbsent(id, () => <int>{});
+        for (var i = 0; i < 32; i++) {
+          if (data[2 + i ~/ 8] & (0x80 >> (i % 8)) != 0) set.add(base + i + 1);
+        }
+      });
+    }
+
+    addMaps(raw, 0x00);
+    for (var base = 0x20; base <= 0xE0; base += 0x20) {
+      if (!maps.values.any((m) => m.contains(base))) break;
+      addMaps(await _send('01${_hex(base)}', generation, timeout: slowCommandTimeout), base);
     }
     await _send('ATH0', generation, timeout: slowCommandTimeout);
     final engine = raw == null ? null : engineEcuFrom(raw);
+    _info = _info.copyWith(clearHybridEcu: true);
+    const hybridPids = {0x5B, 0x9A};
+    final hybrid = maps.entries.where((e) => e.key != engine && e.value.any(hybridPids.contains)).firstOrNull;
+    if (hybrid != null) _info = _info.copyWith(hybridEcu: hybrid.key, hybridPids: hybrid.value);
     if (engine == null) {
       // Not 11-bit CAN, or one ECU only: functional requests are fine.
       _info = _info.copyWith(clearEngineEcu: true);
-      return;
+      return true;
     }
+    if ((maps[engine]?.length ?? 0) < engineMinPids) return false;
     bool ok(String? answer) => answer != null && answer.toUpperCase().contains('OK');
     final id = engine.toRadixString(16).toUpperCase();
     final request = (engine - 8).toRadixString(16).toUpperCase();
@@ -579,17 +862,18 @@ class ObdService extends ChangeNotifier {
     // physical mode 01 request — the Haval H6 PHEV answers `7F 01 11`.
     if (ok(await _send('ATSH$request', generation, timeout: slowCommandTimeout)) && await _carAnswers(generation)) {
       _info = _info.copyWith(engineEcu: engine, engineByFilter: false);
-      return;
+      return true;
     }
     // Functional requests, the adapter keeping only the engine's answers.
     await _send('ATSH7DF', generation, timeout: slowCommandTimeout);
     if (ok(await _send('ATCRA$id', generation, timeout: slowCommandTimeout)) && await _carAnswers(generation)) {
       _info = _info.copyWith(engineEcu: engine, engineByFilter: true);
-      return;
+      return true;
     }
     // No filter either: plain functional requests, as with one ECU.
     await _send('ATAR', generation, timeout: slowCommandTimeout);
     _info = _info.copyWith(clearEngineEcu: true);
+    return true;
   }
 
   Future<void> _readSupportedPids(int generation) async {
@@ -618,17 +902,31 @@ class ObdService extends ChangeNotifier {
     final fast = available([..._fastSignals, airflow]);
     final slow = available(_slowSignals);
     final verySlow = available(_verySlowSignals);
+    final hybridEcu = _info.hybridEcu;
+    final hybridPids = _info.hybridPids ?? const <int>{};
+    final hybrid = hybridEcu == null
+        ? const <ObdSignal>[]
+        : [
+            for (final s in _hybridSignals)
+              if (hybridPids.contains(obdSignalPids[s]) && !(s == ObdSignal.pedal && supported.contains(obdSignalPids[s]))) s,
+          ];
+    var sinceHybrid = hybridPeriod;
     var sinceSlow = slowPeriod; // read the slow groups right away
     var sinceVerySlow = verySlowPeriod;
     var sinceVoltage = Duration.zero;
     var noData = 0;
     while (true) {
+      if (await _serveDiagnostic(generation)) continue;
       final started = _now();
       final answered = await _read(fast, generation);
       if (answered == false) {
         if (++noData >= noDataBeforeCarOff) return;
       } else if (answered == true) {
         noData = 0;
+      }
+      if (hybrid.isNotEmpty && sinceHybrid >= hybridPeriod) {
+        sinceHybrid = Duration.zero;
+        await _readHybrid(hybridEcu!, hybrid, generation);
       }
       if (sinceSlow >= slowPeriod) {
         sinceSlow = Duration.zero;
@@ -646,6 +944,7 @@ class ObdService extends ChangeNotifier {
       await _sleep(fastPeriod - elapsed, generation);
       final tick = elapsed > fastPeriod ? elapsed : fastPeriod;
       sinceSlow += tick;
+      sinceHybrid += tick;
       sinceVerySlow += tick;
       sinceVoltage += tick;
     }
@@ -656,7 +955,7 @@ class ObdService extends ChangeNotifier {
   /// `NO DATA` (ignition off); `null`: nothing to read, or no answer in time.
   Future<bool?> _read(List<ObdSignal> signals, int generation) async {
     if (signals.isEmpty) return null;
-    final pids = [for (final s in signals) obdSignalPids[s]!];
+    final pids = {for (final s in signals) obdSignalPids[s]!}.toList();
     if (_info.multiPid || pids.length == 1) {
       final command = '01${pids.map(_hex).join()}';
       final raw = await _send(command, generation, timeout: _dataTimeout);
@@ -690,15 +989,58 @@ class ObdService extends ChangeNotifier {
     return answered;
   }
 
+  /// Reads [signals] from the hybrid ECU: the adapter's filter moves to it
+  /// for one request (functional, 7DF) and back to the engine.
+  Future<void> _readHybrid(int ecu, List<ObdSignal> signals, int generation) async {
+    String id(int v) => v.toRadixString(16).toUpperCase();
+    final engine = _info.engineEcu;
+    if (!_info.engineByFilter) await _send('ATSH7DF', generation, timeout: slowCommandTimeout);
+    await _send('ATCRA${id(ecu)}', generation, timeout: slowCommandTimeout);
+    try {
+      await _read(signals, generation);
+    } finally {
+      if (_info.engineByFilter && engine != null) {
+        await _send('ATCRA${id(engine)}', generation, timeout: slowCommandTimeout);
+      } else {
+        await _send('ATAR', generation, timeout: slowCommandTimeout);
+        if (engine != null) await _send('ATSH${id(engine - 8)}', generation, timeout: slowCommandTimeout);
+      }
+    }
+  }
+
   void _recordPids(Map<int, List<int>> values) {
     final update = <ObdSignal, double>{};
     for (final entry in obdSignalPids.entries) {
       final data = values[entry.value];
-      if (data == null) continue;
+      if (data == null || entry.value == 0x9A) continue;
       final value = mode01Physical(entry.value, data);
       if (value != null) update[entry.key] = value;
     }
+    final hvData = values[0x9A];
+    final hv = hvData == null ? null : hybridSystemData(hvData);
+    if (hv != null) {
+      update[ObdSignal.hvVoltage] = hv.volts;
+      update[ObdSignal.hvCurrent] = hv.amps;
+    }
     _record(update);
+    final speed = update[ObdSignal.speed];
+    if (speed != null) _countTrip(speed, update[ObdSignal.rpm]);
+  }
+
+  /// Adds the time since the last fast reading to the electric or the engine
+  /// share of [trip] (a gap of more than 3 s is not counted).
+  void _countTrip(double speedKmh, double? rpm) {
+    final now = _now();
+    final last = _lastMotion;
+    _lastMotion = now;
+    if (last == null) return;
+    final dt = now.difference(last);
+    if (dt > const Duration(seconds: 3) || speedKmh < 1) return;
+    final km = speedKmh * dt.inMilliseconds / 3.6e6;
+    final engineOn = (rpm ?? 0) > 0;
+    _trip = engineOn
+        ? _trip.copyWith(engineKm: _trip.engineKm + km, engineTime: _trip.engineTime + dt)
+        : _trip.copyWith(electricKm: _trip.electricKm + km, electricTime: _trip.electricTime + dt);
   }
 
   void _record(Map<ObdSignal, double> update) {

@@ -8,6 +8,7 @@ import '../../services/altitude_trend.dart';
 import '../../services/dashboard_sensor_streams.dart';
 import '../../services/gnss_quality.dart';
 import '../../services/unit_preferences.dart';
+import 'diagnostics/car_diagnostics_section.dart';
 
 /// Portuguese label for how much a GNSS-derived reading (speed, heading)
 /// should be trusted, derived from the same [GnssQuality] that already
@@ -281,6 +282,8 @@ class _DiagnosticsScreenState extends State<DiagnosticsScreen> {
                 _DiagnosticRow('Roll', _rollDegrees == null ? '—' : '${_rollDegrees!.toStringAsFixed(1)}°'),
               ],
             ),
+            // Further down: the car itself, over OBD-II (owner decision, 2026-11-14).
+            const CarDiagnosticsSection(),
           ],
         ),
       ),

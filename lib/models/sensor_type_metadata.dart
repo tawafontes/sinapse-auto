@@ -27,6 +27,10 @@ const Map<SensorType, SensorTypeMetadata> sensorTypeMetadata = {
   SensorType.engineTemperatures: SensorTypeMetadata(label: 'Temperaturas', icon: Icons.device_thermostat, unit: '°C'),
   SensorType.accelerator: SensorTypeMetadata(label: 'Acelerador', icon: Icons.trending_up, unit: '%'),
   SensorType.fuelConsumption: SensorTypeMetadata(label: 'Consumo instantâneo', icon: Icons.eco_outlined, unit: 'km/L'),
+  SensorType.hybridBattery: SensorTypeMetadata(label: 'Bateria de alta tensão', icon: Icons.battery_std, unit: '%'),
+  SensorType.energyFlow: SensorTypeMetadata(label: 'Fluxo de energia', icon: Icons.bolt, unit: 'kW'),
+  SensorType.driveMode: SensorTypeMetadata(label: 'Modo de condução', icon: Icons.electric_car, unit: '%'),
+  SensorType.turboBoost: SensorTypeMetadata(label: 'Turbo', icon: Icons.air, unit: 'bar'),
 };
 
 /// The sensors read from the car through the OBD-II adapter (phase 1). Left
@@ -40,4 +44,8 @@ const Set<SensorType> obdSensorTypes = {
   SensorType.engineTemperatures,
   SensorType.accelerator,
   SensorType.fuelConsumption,
+  SensorType.hybridBattery,
+  SensorType.energyFlow,
+  SensorType.driveMode,
+  SensorType.turboBoost,
 };

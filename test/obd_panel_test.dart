@@ -157,7 +157,17 @@ void main() {
 
     testWidgets('every panel fits a small card, maximized or not', (tester) async {
       await tester.runAsync(() => profile(displacement: 1.0));
-      for (final type in [SensorType.fuelLevel, SensorType.engineTemperatures, SensorType.accelerator, SensorType.fuelConsumption]) {
+      car.haval();
+      for (final type in [
+        SensorType.fuelLevel,
+        SensorType.engineTemperatures,
+        SensorType.accelerator,
+        SensorType.fuelConsumption,
+        SensorType.hybridBattery,
+        SensorType.energyFlow,
+        SensorType.driveMode,
+        SensorType.turboBoost,
+      ]) {
         for (final fullscreen in [false, true]) {
           final service = ObdService(bridge: car, preferences: prefs, now: () => tester.binding.clock.now());
           await tester.pumpWidget(MaterialApp(
@@ -186,6 +196,33 @@ void main() {
       final chart = tester.widget<ObdSparkline>(find.byType(ObdSparkline));
       expect(chart.points.length, greaterThan(10), reason: 'the last minutes, at 2 Hz');
       expect(find.text('L/h · últimos 2 min'), findsOneWidget);
+      await unmount(tester, service);
+    });
+
+    testWidgets('the Haval panels: battery, energy flow, drive mode, turbo', (tester) async {
+      car.haval();
+      var service = await mount(tester, SensorType.hybridBattery, fullscreen: true);
+      expect(line(tester, 'Carga'), '64 %');
+      expect(line(tester, 'Tensão'), '362 V');
+      expect(line(tester, 'Potência'), '8,7 kW');
+      await unmount(tester, service);
+
+      service = await mount(tester, SensorType.energyFlow);
+      expect(line(tester, 'Potência'), '8,7 kW');
+      expect(find.text('Bateria alimentando'), findsOneWidget);
+      car.hvAmps = -20;
+      await tester.pump(const Duration(seconds: 2));
+      expect(find.text('Bateria recarregando'), findsOneWidget);
+      expect(tester.widget<ObdSparkline>(find.byType(ObdSparkline)).points.any((p) => p.$2 < 0), isTrue);
+      await unmount(tester, service);
+
+      service = await mount(tester, SensorType.driveMode);
+      expect(find.text('Motor ligado'), findsOneWidget, reason: 'the scripted car idles at 982 rpm');
+      await unmount(tester, service);
+
+      service = await mount(tester, SensorType.turboBoost, fullscreen: true);
+      expect(find.text('Vácuo'), findsOneWidget, reason: 'idling: 35 kPa in the manifold');
+      expect(line(tester, 'Barométrica'), '94 kPa');
       await unmount(tester, service);
     });
 

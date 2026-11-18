@@ -150,6 +150,7 @@ int? mode01DataLength(int pid) {
   if (pid % 0x20 == 0) return 4; // the "supported PIDs" bitmaps
   return switch (pid) {
     0x01 || 0x41 || 0x4F || 0x50 || 0xA6 => 4,
+    0x9A => 6,
     0x03 || 0x0C || 0x10 || 0x1F || 0x21 || 0x22 || 0x23 || 0x31 || 0x32 || 0x42 || 0x43 || 0x44 || 0x4D || 0x4E => 2,
     >= 0x14 && <= 0x1B => 2,
     >= 0x3C && <= 0x3F => 2,
@@ -193,6 +194,8 @@ double? mode01Physical(int pid, List<int> d) {
   final ab = d.length >= 2 ? d[0] * 256 + d[1] : d[0];
   return switch (pid) {
     0x0C => ab / 4,
+    // The fuel trims (short and long term, banks 1 and 2): -100 to +99 %.
+    0x06 || 0x07 || 0x08 || 0x09 => (a - 128) * 100 / 128,
     0x04 || 0x11 || 0x2F || 0x49 || 0x52 || 0x5B => a * 100 / 255,
     0x05 || 0x0F || 0x46 => (a - 40).toDouble(),
     0x0B || 0x0D || 0x33 => a.toDouble(),
@@ -203,6 +206,17 @@ double? mode01Physical(int pid, List<int> d) {
     0xA6 when d.length >= 4 => ((d[0] << 24) | (d[1] << 16) | (d[2] << 8) | d[3]) / 10,
     _ => null,
   };
+}
+
+/// PID 9A, "Hybrid/EV vehicle system data" (SAE J1979-DA): byte A the
+/// charging state, B-C the high-voltage battery's voltage (1/64 V per bit),
+/// D-E its current, signed, 0.1 A per bit. `null` when too short.
+({double volts, double amps, int state})? hybridSystemData(List<int> d) {
+  if (d.length < 5) return null;
+  final volts = (d[1] * 256 + d[2]) / 64;
+  var raw = d[3] * 256 + d[4];
+  if (raw >= 0x8000) raw -= 0x10000;
+  return (volts: volts, amps: raw / 10, state: d[0]);
 }
 
 /// The adapter's own battery reading (`ATRV` → `13.3V`), or `null`.
@@ -257,4 +271,44 @@ int? engineEcuFrom(String raw) {
     }
   }
   return best;
+}
+
+/// Every whole message of an 11-bit CAN reply with headers on (ATH1 ATS0), by
+/// CAN id, ISO-TP reassembled: single frames (`7E8 06 41 00 …`) and
+/// multi-frame answers (`7E8 10 14 49 02 01 …`, then `7E8 21 …`, `7E8 22 …`),
+/// in the order they came — a functional request reaches several ECUs, and
+/// headers on tell which one said what (the diagnostic reports, 2026-11-15).
+/// Lines that are not frames (`NO DATA`, `?`) are skipped.
+Map<int, List<List<int>>> canMessages(String raw) {
+  final messages = <int, List<List<int>>>{};
+  final open = <int, ({int length, List<int> data})>{};
+  for (final line in responseLines(raw)) {
+    final t = line.toUpperCase().replaceAll(' ', '');
+    if (!RegExp(r'^[0-9A-F]{3}([0-9A-F]{2})+$').hasMatch(t)) continue;
+    final id = int.parse(t.substring(0, 3), radix: 16);
+    final payload = [for (var i = 3; i < t.length; i += 2) int.parse(t.substring(i, i + 2), radix: 16)];
+    if (payload.isEmpty) continue;
+    final pci = payload.first;
+    switch (pci >> 4) {
+      case 0:
+        final length = pci & 0x0F;
+        if (length == 0 || payload.length < 1 + length) continue;
+        messages.putIfAbsent(id, () => []).add(payload.sublist(1, 1 + length));
+      case 1:
+        if (payload.length < 2) continue;
+        final length = ((pci & 0x0F) << 8) | payload[1];
+        open[id] = (length: length, data: payload.sublist(2));
+      case 2:
+        final pending = open[id];
+        if (pending == null) continue;
+        pending.data.addAll(payload.sublist(1));
+        if (pending.data.length >= pending.length) {
+          messages.putIfAbsent(id, () => []).add(pending.data.sublist(0, pending.length));
+          open.remove(id);
+        }
+    }
+  }
+  // A multi-frame answer cut short (the adapter's buffer, a timeout): what came.
+  open.forEach((id, pending) => messages.putIfAbsent(id, () => []).add(pending.data));
+  return messages;
 }

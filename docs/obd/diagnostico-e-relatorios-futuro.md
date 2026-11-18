@@ -1,6 +1,6 @@
 # Diagnóstico do carro e relatórios OBD-II: desenho (implementação futura)
 
-> **Situação:** desenho aprovado, **não iniciado**. Fica registrado como implementação futura, para depois das fases 1 (validação no carro) e 2 (gravação e calibração).
+> **Situação (2026-11-15):** **implementado em parte, falta validar no carro.** Já existem a sessão de diagnóstico com a política de comandos (etapa 1), a saúde do veículo com o histórico e o apagar códigos (etapa 2), a bateria, partida e carga (etapa 3) e os monitores de emissões e prontidão (parte da etapa 5). Ainda não começaram: o repouso do adaptador (`dormant`), o modo 06 e as falhas de ignição por cilindro, a matriz de fuel trim, as gravações e o osciloscópio, os outros módulos (UDS) e a exportação. A seção 12 resume o que foi feito e as diferenças em relação a este desenho.
 > **Origem:** o arquivo de requisitos do dono (`requisitos_e_relatorios_do_sistema_obd.txt`, RF01 a RF05 e cinco relatórios), adaptado ao adaptador e aos carros que temos de fato.
 > **Data:** 2026-11-14.
 
@@ -258,3 +258,57 @@ Cada etapa é entregue e validada no carro antes da próxima:
 - Quais centrais o Haval expõe no OBD genérico (motor? câmbio DHT? central híbrida?) e em UDS.
 - Os endereços UDS alcançáveis no Nivus através do gateway sem sessão estendida.
 - **Haval PHEV:** a tensão do DC-DC em READY, o tempo até ele entrar e se a partida do motor a combustão aparece na rede de 12 V.
+
+## 12. O que foi implementado (2026-11-15)
+
+**Telas.** Em Configurações → Diagnóstico, rolando para baixo, aparece o cartão **"Diagnóstico do carro"** com o estado do link e os itens:
+- Saúde do veículo;
+- Bateria, partida e carga;
+- Emissões e prontidão;
+- Gravações OBD e Outros módulos, desabilitados com "em breve";
+- Histórico de relatórios.
+
+Cada relatório tem "Executar" (desabilitado, com o motivo, sem link), progresso, Cancelar e o resultado com semáforo. Os dados brutos ficam em "Detalhes técnicos"; ali, a resposta do `0902` aparece oculta, porque é o VIN em hexadecimal.
+
+**Código.**
+- `lib/services/obd/obd_service.dart`: a sessão de diagnóstico.
+  - `runDiagnostic()` entrega um `DiagnosticLink` ao relatório. O relatório roda **dentro do laço do próprio link**, na próxima volta do polling ou da espera pelo carro, de modo que o serviço continua sendo o único dono do adaptador.
+  - Ao terminar, `_restoreAddressing()` repõe `ATAR`, `ATH0` e o endereçamento do motor: `ATSH7E0` no Nivus, `ATSH7DF` + `ATCRA7E8` no Haval.
+  - Enquanto o relatório roda, os widgets mantêm o último valor sem borda vermelha.
+  - Se o link cai, o relatório vira **incompleto**, guarda o que já leu e o serviço reconecta normalmente.
+- `lib/services/obd/diagnostic/`:
+  - `diagnostic_policy.dart`: a lista de permissões (5.2), conferida em cada comando;
+  - `obd_modes.dart`: decodificação dos modos 01 (monitores), 02, 03/07/0A e 09;
+  - `dtc_catalog.dart`: a tabela de 777 códigos, que agora entra no APK pelo `pubspec.yaml`;
+  - `diagnostic_report_repository.dart`: o histórico;
+  - `report_runner.dart`: cancelamento, progresso e o fim da execução;
+  - `reports/`: saúde, bateria e emissões.
+- `lib/models/diagnostic_report.dart`: o envelope do relatório.
+- `lib/screens/settings/diagnostics/`: as telas.
+- `elm327_decode.dart` ganhou `canMessages()`, que remonta o ISO-TP por central com os cabeçalhos ligados.
+
+**Diferenças em relação ao desenho:**
+- **Persistência (5.3).** A caixa `obd_diagnostic_reports` é **sem tipo** e guarda cada relatório como texto JSON, em vez de um adaptador Hive com `typeId` 22. Assim o formato pode crescer sem gerador de código. O `typeId` 22 continua livre.
+- **Gravação de viagem (5.1).** As **leituras** rodam mesmo com uma sessão gravando: levam poucos segundos, e com "Iniciar sessão quando o carro ligar" o carro ligado quase sempre está gravando. Só o **apagar códigos** exige a gravação parada, como em 7.6.
+- **Confirmação do apagar (7.6).** É um botão que se **segura por 2 s**; um toque não basta.
+- **Endereço do apagar.** O `04` vai **só ao motor**, endereçado fisicamente (`ATSH7E0`). Se a central recusar (o Haval recusa o modo 01 físico e pode recusar o 04 também), nada é apagado e o app explica; não há tentativa funcional, que apagaria também as outras centrais.
+- **Comparação (8).** Cada relatório se compara sozinho com o anterior do mesmo tipo e do mesmo VIN (códigos novos e resolvidos). Depois de apagar, a comparação é com o relatório de antes, e os dois ficam ligados ("Ver o relatório de antes/depois de apagar"). Ainda não há a escolha livre "Comparar com…".
+- **Bateria.** Cada passo salva o relatório de novo, com o mesmo id, para que sair no meio não perca o que já foi feito. O relatório da bateria, feito com o carro desligado, usa o último VIN lido.
+- **Emissões.** Só os monitores (`0101`/`0141`) e o uso desde o apagamento. O modo 06 fica para a próxima etapa.
+
+**Testes.**
+- `test/obd_diagnostic_test.dart`: a política, a decodificação, a tabela, os limites da bateria, cada relatório contra o carro simulado (Nivus e Haval), link caindo, cancelamento e o limite de 200 relatórios do histórico.
+- `test/session_host/obd_diagnostic_reports_app_test.dart`: o fluxo no app real, do Executar ao apagar com o botão segurado, mais o histórico, as emissões e a bateria.
+
+**A validar no carro:**
+- Nivus: o relatório de saúde, com os nomes das centrais e o CALID/CVN.
+- Haval: se o motor aceita o `04` físico; o salto do DC-DC na ativação e a faixa de tensão dele.
+- O ritmo real de `ATRV` durante a partida.
+
+**Validado no Haval H6 PHEV (2026-11-16 e 2026-11-18):**
+- Saúde: 6 centrais responderam (7E8–7EF), nenhuma com código; VIN, CALID, CVN e nome das centrais lidos; o endereçamento volta sozinho para o polling depois do relatório.
+- Emissões: todos os monitores do motor completos ("Pronto para inspeção"); no ciclo atual, incompletos logo após ligar (normal).
+- Ativação (READY): queda para 12,0–12,3 V e DC-DC a 13,3 V em menos de 1 s, repetido duas vezes. Tocar com o carro já ligado (≥ 13 V) agora avisa, para em 3 leituras e mantém a medida boa anterior (antes, sobrescrevia com "não percebi").
+- Carga: só elétrico 13,3–13,4 V; com o motor a combustão 13,6 V estável de 1.018 a 1.760 rpm.
+- `ATRV` rende ~8–10 leituras/s com o polling suspenso.
+- Pendentes: Repouso após horas desligado; o `04` físico (o carro não tinha códigos); pausas curtas de ~1,5 s em que o carro não responde (vistas em 16/11) — conferir se o relatório as tolera.

@@ -26,6 +26,27 @@ class FakeEcu {
   }
 
   List<int>? bitmap(int base) => bitmaps[base];
+
+  // The diagnostic reports (2026-11-15): codes, freeze frame, identification.
+  List<String> stored = [];
+  List<String> pending = [];
+  List<String> permanent = [];
+
+  /// The code that froze the frame (mode 02), `null`: no freeze frame.
+  String? freezeDtc;
+  String? name;
+  String? calibrationId;
+  List<int>? cvn;
+
+  /// Mode 04 cleared it: its monitors start over.
+  bool cleared = false;
+}
+
+/// A `P0123`-style code as its two bytes.
+List<int> fakeDtcBytes(String code) {
+  const letters = 'PCBU';
+  final a = (letters.indexOf(code[0]) << 6) | (int.parse(code[1]) << 4) | int.parse(code[2], radix: 16);
+  return [a, int.parse(code.substring(3), radix: 16)];
 }
 
 /// A scripted Vgate iCar Pro (ELM327 v2.3) plugged into a VW Nivus 2021, built
@@ -50,7 +71,9 @@ class FakeEcu {
 /// timed-out request takes its whole timeout. Under `testWidgets` both run on
 /// the fake clock, so a test drives minutes of driving with `tester.pump`.
 class FakeObdCar implements ObdBridge {
-  FakeObdCar({this.latency = const Duration(milliseconds: 60)});
+  FakeObdCar({this.latency = const Duration(milliseconds: 60)}) {
+    _identify();
+  }
 
   final Duration latency;
 
@@ -65,7 +88,37 @@ class FakeObdCar implements ObdBridge {
     0x40: [0xE0, 0x80, 0x00, 0x00],
   });
 
-  List<FakeEcu> get ecus => [engine, gearbox];
+  /// The hybrid system's ECU, on a [haval] car: the high-voltage battery
+  /// (5B), its voltage and current (9A) and the pedal (49).
+  FakeEcu? hybrid;
+
+  List<FakeEcu> get ecus => [engine, gearbox, ?hybrid];
+
+  /// ECUs that go on answering with the car switched off — the Haval's
+  /// battery and charger modules (7EC, 7ED, 7EF), for minutes after it is
+  /// switched off, while the engine is silent.
+  final offEcus = <FakeEcu>[];
+
+  String vin = '9BWZZZ5Z0MP012345';
+
+  /// The check-engine light (follows the engine's stored codes unless set).
+  bool? milOverride;
+  bool get mil => milOverride ?? engine.stored.isNotEmpty;
+
+  /// Kilometres since the codes were last cleared (PID 31).
+  double kmSinceClear = 4321;
+
+  /// The next ATRV answers, in order (a cranking dip, the DC-DC's jump);
+  /// [batteryVolts] once used up.
+  final voltageQueue = <double>[];
+
+  /// The Nivus' engine with a code, its freeze frame and its identification.
+  void withEngineCodes({List<String> stored = const ['P0301'], List<String> pending = const ['P0171']}) {
+    engine
+      ..stored = [...stored]
+      ..pending = [...pending]
+      ..freezeDtc = stored.isEmpty ? null : stored.first;
+  }
 
   /// Every command sent, in order — for tests asserting what went on the wire.
   final sent = <String>[];
@@ -83,6 +136,29 @@ class FakeObdCar implements ObdBridge {
   double catalystC = 512;
   double pedalPercent = 18;
   double odometerKm = 23456.7;
+  double baroKpa = 94;
+  double hybridChargePercent = 64;
+  double hvVolts = 362;
+
+  /// Positive while the battery feeds the car.
+  double hvAmps = 24;
+
+  /// The Haval H6 PHEV as seen on 2026-11-15: the engine refuses physical
+  /// requests, reports the odometer but not the pedal; a hybrid ECU at 7EB
+  /// reports the pedal and the high-voltage battery.
+  void haval() {
+    refusesPhysicalMode01 = true;
+    reportOdometer();
+    final m40 = engine.bitmaps[0x40]!;
+    engine.bitmaps[0x40] = [m40[0], m40[1] & ~0x80, m40[2], m40[3]]; // no 49
+    hybrid = FakeEcu(responseId: 0x7EB, bitmaps: {
+      0x00: [0x98, 0x18, 0x80, 0x01],
+      0x20: [0x00, 0x00, 0x00, 0x01],
+      0x40: [0x44, 0xC0, 0x00, 0x21],
+      0x60: [0x00, 0x00, 0x00, 0x01],
+      0x80: [0x00, 0x00, 0x00, 0x40],
+    });
+  }
 
   /// The Haval H6 PHEV's extra: the odometer (PID A6), which the Nivus lacks.
   void reportOdometer() {
@@ -130,6 +206,16 @@ class FakeObdCar implements ObdBridge {
   void plugIn() {
     _plugged = true;
     _resetElm();
+  }
+
+  void _identify() {
+    engine
+      ..name = 'ECM\u0000-EngineControl'
+      ..calibrationId = '04C906032BA'
+      ..cvn = [0x1A, 0x2B, 0x3C, 0x4D];
+    gearbox
+      ..name = 'TCM\u0000-TransmissionCtrl'
+      ..calibrationId = '0CW300040';
   }
 
   void _resetElm() {
@@ -190,7 +276,82 @@ class FakeObdCar implements ObdBridge {
   String _answer(String c) {
     if (c.startsWith('AT')) return _at(c.substring(2));
     if (RegExp(r'^01([0-9A-F]{2})+$').hasMatch(c)) return _mode01(c);
+    if (RegExp(r'^(02|03|04|07|09|0A)([0-9A-F]{2})*$').hasMatch(c)) return _diagnostic(c);
     return 'NO DATA';
+  }
+
+  /// Modes 02, 03, 04, 07, 09 and 0A, per ECU.
+  String _diagnostic(String c) {
+    final pool = ignition == FakeIgnition.off ? offEcus : ecus;
+    var targets = _header == 0x7DF ? pool : pool.where((e) => e.requestId == _header).toList();
+    final filter = _receiveFilter;
+    if (filter != null) targets = targets.where((e) => e.responseId == filter).toList();
+    final mode = int.parse(c.substring(0, 2), radix: 16);
+    final args = [for (var i = 2; i < c.length; i += 2) int.parse(c.substring(i, i + 2), radix: 16)];
+    final answers = <String>[];
+    for (final ecu in targets) {
+      final payload = _diagnosticPayload(ecu, mode, args);
+      if (payload != null) answers.add(_frames(ecu.responseId, payload));
+    }
+    return answers.isEmpty ? 'NO DATA' : answers.join('\r');
+  }
+
+  List<int>? _diagnosticPayload(FakeEcu ecu, int mode, List<int> args) {
+    List<int> codes(int sid, List<String> list) => [sid, list.length, for (final code in list) ...fakeDtcBytes(code)];
+    List<int> ascii(String text, int length) => [for (var i = 0; i < length; i++) i < text.length ? text.codeUnitAt(i) : 0];
+    switch (mode) {
+      case 0x03:
+        return codes(0x43, ecu.stored);
+      case 0x07:
+        return codes(0x47, ecu.pending);
+      case 0x0A:
+        return codes(0x4A, ecu.permanent);
+      case 0x04:
+        if (ignition == FakeIgnition.running) return [0x7F, 0x04, 0x22];
+        ecu
+          ..stored = []
+          ..pending = []
+          ..freezeDtc = null
+          ..cleared = true;
+        if (ecu == engine) {
+          milOverride = null;
+          kmSinceClear = 0;
+        }
+        return [0x44];
+      case 0x02:
+        if (args.length < 2 || ecu.freezeDtc == null) return null;
+        final pid = args[0];
+        if (pid == 0x02) return [0x42, 0x02, 0x00, ...fakeDtcBytes(ecu.freezeDtc!)];
+        if (pid == 0x00) return [0x42, 0x00, 0x00, 0x1F, 0x3B, 0x80, 0x00];
+        final value = _value(ecu, pid);
+        return value == null ? null : [0x42, pid, 0x00, ...value];
+      case 0x09:
+        if (args.isEmpty) return null;
+        switch (args[0]) {
+          case 0x00:
+            return [0x49, 0x00, 0x54, 0x40, 0x00, 0x00];
+          case 0x02:
+            return ecu == engine ? [0x49, 0x02, 0x01, ...vin.codeUnits] : null;
+          case 0x04:
+            return ecu.calibrationId == null ? null : [0x49, 0x04, 0x01, ...ascii(ecu.calibrationId!, 16)];
+          case 0x06:
+            return ecu.cvn == null ? null : [0x49, 0x06, 0x01, ...ecu.cvn!];
+          case 0x0A:
+            return ecu.name == null ? null : [0x49, 0x0A, 0x01, ...ascii(ecu.name!, 20)];
+        }
+        return null;
+    }
+    return null;
+  }
+
+  /// PID 01 / 41: the light and the count (A), the continuous monitors, all
+  /// complete (B), spark ignition with catalyst, EVAP, O2 sensor and heater
+  /// supported (C) and, after a clear, all of them incomplete (D).
+  List<int> _monitorBytes(FakeEcu ecu, {required bool thisCycle}) {
+    const supported = 0x01 | 0x04 | 0x20 | 0x40;
+    final incomplete = ecu.cleared ? supported : (thisCycle ? 0x04 : 0x00);
+    final a = thisCycle ? 0x00 : (ecu == engine && mil ? 0x80 : 0x00) | (ecu.stored.length & 0x7F);
+    return [a, 0x07, supported, incomplete];
   }
 
   String _at(String c) {
@@ -203,7 +364,8 @@ class FakeObdCar implements ObdBridge {
       case '@1':
         return 'OBDII to RS232 Interpreter';
       case 'RV':
-        return '${batteryVolts.toStringAsFixed(1)}V';
+        final volts = voltageQueue.isEmpty ? batteryVolts : voltageQueue.removeAt(0);
+        return '${volts.toStringAsFixed(1)}V';
       case 'DP':
         return 'AUTO, ISO 15765-4 (CAN 11/500)';
       case 'DPN':
@@ -217,7 +379,7 @@ class FakeObdCar implements ObdBridge {
       case 'H0' || 'H1':
         _headers = c == 'H1';
         return 'OK';
-      case 'L0' || 'L1' || 'SP0':
+      case 'L0' || 'L1' || 'SP0' || 'AT0' || 'AT1' || 'AT2':
         return 'OK';
       case 'AR':
         _receiveFilter = null;
@@ -228,6 +390,7 @@ class FakeObdCar implements ObdBridge {
       _receiveFilter = int.parse(cra.group(1)!, radix: 16);
       return 'OK';
     }
+    if (RegExp(r'^ST[0-9A-F]{2}$').hasMatch(c)) return 'OK';
     final sh = RegExp(r'^SH([0-9A-F]{3})$').firstMatch(c);
     if (sh != null) {
       _header = int.parse(sh.group(1)!, radix: 16);
@@ -237,11 +400,12 @@ class FakeObdCar implements ObdBridge {
   }
 
   String _mode01(String c) {
-    if (ignition == FakeIgnition.off) return 'NO DATA';
+    final pool = ignition == FakeIgnition.off ? offEcus : ecus;
+    if (pool.isEmpty) return 'NO DATA';
     final pids = [for (var i = 2; i < c.length; i += 2) int.parse(c.substring(i, i + 2), radix: 16)];
     var targets = switch (_header) {
-      0x7DF => ecus,
-      _ => ecus.where((e) => e.requestId == _header).toList(),
+      0x7DF => pool,
+      _ => pool.where((e) => e.requestId == _header).toList(),
     };
     if (_header != 0x7DF && refusesPhysicalMode01) return _bytes([0x7F, 0x01, 0x11]);
     if (_header == 0x7DF && (_functionalAnswers++).isOdd) targets = targets.reversed.toList();
@@ -291,7 +455,21 @@ class FakeObdCar implements ObdBridge {
           final mv = (batteryVolts * 1000 + 360).round();
           return [mv >> 8, mv & 0xFF];
         }(),
-      0x01 => [0x00, 0x07, 0xE1, 0x00],
+      0x01 => _monitorBytes(ecu, thisCycle: false),
+      0x41 => _monitorBytes(ecu, thisCycle: true),
+      0x21 => [0x00, mil ? 0x2A : 0x00],
+      0x30 => [ecu.cleared ? 0 : 0x7B],
+      0x31 => () {
+          final km = kmSinceClear.round();
+          return [km >> 8, km & 0xFF];
+        }(),
+      0x33 => [baroKpa.round()],
+      0x5B => [pct(hybridChargePercent)],
+      0x9A => () {
+          final v = (hvVolts * 64).round();
+          final a = (hvAmps * 10).round() & 0xFFFF;
+          return [0x00, v >> 8, v & 0xFF, a >> 8, a & 0xFF, 0x00];
+        }(),
       0xA6 => () {
           final raw = (odometerKm * 10).round();
           return [raw >> 24 & 0xFF, raw >> 16 & 0xFF, raw >> 8 & 0xFF, raw & 0xFF];

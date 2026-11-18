@@ -26,6 +26,17 @@ class _ConsumptionTrace {
 
 final _traces = Expando<_ConsumptionTrace>('obdConsumption');
 
+/// The recent energy flow (kW) of one [ObdService], for its chart.
+final _energyTraces = Expando<List<({DateTime at, double kw})>>('obdEnergy');
+
+/// The highest turbo boost (kPa) seen on one [ObdService].
+final _boostPeaks = Expando<List<double>>('obdBoostPeak');
+
+/// Battery power in kW from its voltage and current: positive while the
+/// battery feeds the car, negative while it is charged (regeneration, the
+/// engine). The sign is the one PID 9A carries (to be confirmed on the Haval).
+double? _batteryKw(double? volts, double? amps) => volts == null || amps == null ? null : volts * amps / 1000;
+
 /// The OBD-II panels (owner requests, 2026-11-14 and -15): several values in
 /// one card, drawn rather than listed, with more when maximized ([fullscreen]):
 ///
@@ -80,6 +91,12 @@ class _ObdPanelViewState extends State<ObdPanelView> {
     ObdSignal.manifoldPressure: 38.0,
     ObdSignal.throttle: 18.0,
     ObdSignal.pedal: 22.0,
+    ObdSignal.hybridBattery: 64.0,
+    ObdSignal.hvVoltage: 362.0,
+    ObdSignal.hvCurrent: 24.0,
+    ObdSignal.rpm: 0.0,
+    ObdSignal.speed: 42.0,
+    ObdSignal.baro: 94.0,
   };
 
   @override
@@ -103,6 +120,8 @@ class _ObdPanelViewState extends State<ObdPanelView> {
     service.addListener(_changed);
     _readings = service.readingsStream.listen((_) {
       if (widget.sensorType == SensorType.fuelConsumption) _recordConsumption();
+      if (widget.sensorType == SensorType.energyFlow) _recordEnergy();
+      if (widget.sensorType == SensorType.turboBoost) _recordBoost();
       _changed();
     });
     _freshness = Timer.periodic(const Duration(seconds: 1), (_) => _changed());
@@ -192,6 +211,40 @@ class _ObdPanelViewState extends State<ObdPanelView> {
     }
   }
 
+  // ───────────────────────── hybrid, turbo ─────────────────────────
+
+  void _recordEnergy() {
+    final service = widget.service;
+    if (service == null) return;
+    final v = _read(ObdSignal.hvVoltage);
+    final a = _read(ObdSignal.hvCurrent);
+    final kw = _batteryKw(v.value, a.value);
+    final at = service.readings[ObdSignal.hvCurrent]?.at;
+    if (kw == null || v.stale || a.stale || at == null) return;
+    final trace = _energyTraces[service] ??= [];
+    if (trace.isNotEmpty && !at.isAfter(trace.last.at)) return;
+    trace.add((at: at, kw: kw));
+    while (trace.isNotEmpty && at.difference(trace.first.at) > _keep) {
+      trace.removeAt(0);
+    }
+  }
+
+  /// The turbo boost in kPa: manifold minus barometric (an assumed 101 kPa
+  /// until the car's barometric pressure is read).
+  double? _boostKpa() {
+    final map = _read(ObdSignal.manifoldPressure).value;
+    if (map == null) return null;
+    return map - (_read(ObdSignal.baro).value ?? 101);
+  }
+
+  void _recordBoost() {
+    final service = widget.service;
+    final boost = _boostKpa();
+    if (service == null || boost == null || _read(ObdSignal.manifoldPressure).stale) return;
+    final peak = _boostPeaks[service] ??= [0];
+    if (boost > peak[0]) peak[0] = boost;
+  }
+
   // ───────────────────────── build ─────────────────────────
 
   String _emptyText() {
@@ -213,6 +266,10 @@ class _ObdPanelViewState extends State<ObdPanelView> {
       SensorType.fuelLevel => [_read(ObdSignal.fuelLevel)],
       SensorType.engineTemperatures => [_read(ObdSignal.coolant), _read(ObdSignal.intakeTemp), _read(ObdSignal.ambientTemp), _read(ObdSignal.catalystTemp)],
       SensorType.accelerator => [_read(ObdSignal.throttle), _read(ObdSignal.pedal)],
+      SensorType.hybridBattery => [_read(ObdSignal.hybridBattery)],
+      SensorType.energyFlow => [_read(ObdSignal.hvVoltage), _read(ObdSignal.hvCurrent)],
+      SensorType.driveMode => [_read(ObdSignal.rpm), _read(ObdSignal.speed)],
+      SensorType.turboBoost => [_read(ObdSignal.manifoldPressure)],
       _ => <_Read>[],
     };
     final consumption = widget.sensorType == SensorType.fuelConsumption && !widget.preview ? _consumption() : null;
@@ -239,6 +296,10 @@ class _ObdPanelViewState extends State<ObdPanelView> {
       SensorType.engineTemperatures => _temperatures(theme, stale),
       SensorType.accelerator => _accelerator(theme, stale),
       SensorType.fuelConsumption => _consumptionBody(theme, stale),
+      SensorType.hybridBattery => _hybridBattery(theme, stale),
+      SensorType.energyFlow => _energyFlow(theme, stale),
+      SensorType.driveMode => _driveMode(theme, stale),
+      SensorType.turboBoost => _turbo(theme, stale),
       _ => const SizedBox.shrink(),
     };
 
@@ -490,6 +551,203 @@ class _ObdPanelViewState extends State<ObdPanelView> {
           ),
           const SizedBox(height: 4),
           Text('Estimativa: será calibrada com os seus abastecimentos.', style: label),
+        ],
+      ],
+    );
+  }
+
+  Widget _hybridBattery(ThemeData theme, bool stale) {
+    final charge = _read(ObdSignal.hybridBattery);
+    final volts = _read(ObdSignal.hvVoltage);
+    final amps = _read(ObdSignal.hvCurrent);
+    final kw = _batteryKw(volts.value, amps.value);
+    return Column(
+      children: [
+        Expanded(
+          child: Center(
+            child: ObdArcGauge(
+              value: charge.value,
+              min: 0,
+              max: 100,
+              stops: ObdScales.fuel,
+              startLabel: '0',
+              endLabel: '100',
+              dimmed: stale,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.battery_charging_full_rounded,
+                      size: 40, color: charge.value == null ? theme.colorScheme.outline : obdColorAt(ObdScales.fuel, charge.value!)),
+                  _value(theme, 'Carga', charge.value == null ? null : _whole(charge.value!), '%', theme.textTheme.displayLarge, stale),
+                ],
+              ),
+            ),
+          ),
+        ),
+        if (widget.fullscreen) ...[
+          const SizedBox(height: 12),
+          _pair(theme, 'Tensão', _value(theme, 'Tensão', volts.value == null ? null : _whole(volts.value!), 'V', theme.textTheme.headlineSmall, volts.stale)),
+          _pair(theme, 'Corrente', _value(theme, 'Corrente', amps.value == null ? null : _pt(amps.value!, 1), 'A', theme.textTheme.headlineSmall, amps.stale)),
+          _pair(theme, 'Potência', _value(theme, 'Potência', kw == null ? null : _pt(kw, 1), 'kW', theme.textTheme.headlineSmall, stale)),
+        ],
+      ],
+    );
+  }
+
+  Widget _energyFlow(ThemeData theme, bool stale) {
+    final window = widget.fullscreen ? 300.0 : 120.0;
+    final volts = _read(ObdSignal.hvVoltage);
+    final amps = _read(ObdSignal.hvCurrent);
+    final kw = _batteryKw(volts.value, amps.value);
+    final List<(double, double)> points;
+    if (widget.preview) {
+      points = [for (var i = 0; i <= 24; i++) (120.0 - i * 5, 12 * math.sin(i / 2.5) + 4)];
+    } else {
+      final trace = _energyTraces[widget.service ?? Object()] ?? const [];
+      final now = trace.isEmpty ? null : trace.last.at;
+      points = [
+        for (final e in trace)
+          if (now!.difference(e.at).inMilliseconds / 1000 <= window) (now.difference(e.at).inMilliseconds / 1000, e.kw),
+      ];
+    }
+    final String status;
+    final Color color;
+    if (kw == null || kw.abs() < 0.5) {
+      status = 'Em repouso';
+      color = theme.colorScheme.onSurfaceVariant;
+    } else if (kw > 0) {
+      status = 'Bateria alimentando';
+      color = obdOrange;
+    } else {
+      status = 'Bateria recarregando';
+      color = obdGreen;
+    }
+    final label = theme.textTheme.labelSmall?.copyWith(color: theme.colorScheme.onSurfaceVariant);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Expanded(
+          flex: 5,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: Alignment.centerLeft,
+                  child: _value(theme, 'Potência', kw == null ? null : _pt(kw.abs(), 1), 'kW', theme.textTheme.displayLarge, stale,
+                      color: stale ? null : Color.lerp(color, theme.colorScheme.onSurface, 0.3)),
+                ),
+              ),
+              Text(status, key: const ValueKey('obdEnergyStatus'), style: theme.textTheme.titleSmall?.copyWith(color: color)),
+            ],
+          ),
+        ),
+        Expanded(
+          flex: 4,
+          child: Padding(
+            padding: const EdgeInsets.only(top: 4),
+            child: ObdSparkline(points: points, window: window, minTop: 5, color: stale ? theme.colorScheme.outline : theme.colorScheme.primary),
+          ),
+        ),
+        const SizedBox(height: 2),
+        Text('kW · acima de zero alimentando, abaixo recarregando', style: label, maxLines: 1, overflow: TextOverflow.ellipsis),
+        if (widget.fullscreen) ...[
+          const SizedBox(height: 8),
+          _pair(theme, 'Tensão', _value(theme, 'Tensão', volts.value == null ? null : _whole(volts.value!), 'V', theme.textTheme.headlineSmall, volts.stale)),
+          _pair(theme, 'Corrente', _value(theme, 'Corrente', amps.value == null ? null : _pt(amps.value!, 1), 'A', theme.textTheme.headlineSmall, amps.stale)),
+        ],
+      ],
+    );
+  }
+
+  Widget _driveMode(ThemeData theme, bool stale) {
+    final rpm = _read(ObdSignal.rpm).value;
+    final trip = widget.preview
+        ? const ObdDriveTrip(electricKm: 8.2, engineKm: 3.1, electricTime: Duration(minutes: 14), engineTime: Duration(minutes: 5))
+        : (widget.service?.trip ?? const ObdDriveTrip());
+    final engineOn = (rpm ?? 0) > 0;
+    final color = engineOn ? obdOrange : obdGreen;
+    final share = trip.electricShare;
+    String duration(Duration d) => d.inHours > 0 ? '${d.inHours} h ${d.inMinutes % 60} min' : '${d.inMinutes} min';
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Expanded(
+          flex: 5,
+          child: Row(
+            children: [
+              Icon(engineOn ? Icons.local_gas_station_rounded : Icons.electric_car_rounded, size: 56, color: stale ? theme.colorScheme.outline : color),
+              const SizedBox(width: 10),
+              Expanded(
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    engineOn ? 'Motor ligado' : 'Elétrico',
+                    key: const ValueKey('obdDriveMode'),
+                    style: theme.textTheme.displaySmall?.copyWith(fontWeight: FontWeight.w700, color: stale ? theme.colorScheme.onSurfaceVariant : color),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        _pair(
+          theme,
+          'Elétrico na viagem',
+          _value(theme, 'Elétrico na viagem', share == null ? null : _whole(share * 100), '%', theme.textTheme.headlineSmall, stale),
+        ),
+        const SizedBox(height: 6),
+        ObdScaleBar(value: share == null ? null : share * 100, min: 0, max: 100, stops: const [(0, obdOrange), (100, obdGreen)], thickness: 12, dimmed: stale),
+        const SizedBox(height: 4),
+        Text('${_pt(trip.totalKm, 1)} km nesta viagem', style: theme.textTheme.labelSmall?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
+        if (widget.fullscreen) ...[
+          const SizedBox(height: 10),
+          _pair(theme, 'Elétrico', Text('${_pt(trip.electricKm, 1)} km · ${duration(trip.electricTime)}', style: theme.textTheme.titleMedium)),
+          _pair(theme, 'Motor ligado', Text('${_pt(trip.engineKm, 1)} km · ${duration(trip.engineTime)}', style: theme.textTheme.titleMedium)),
+        ],
+        const Spacer(flex: 1),
+      ],
+    );
+  }
+
+  Widget _turbo(ThemeData theme, bool stale) {
+    final boost = widget.preview ? 62.0 : _boostKpa();
+    final peak = widget.preview ? 98.0 : (_boostPeaks[widget.service ?? Object()]?[0] ?? 0);
+    final bar = boost == null ? null : boost / 100;
+    const stops = <ObdColorStop>[(0, obdGreen), (0.3, obdBlue), (1.2, obdBlue), (1.4, obdOrange), (1.6, obdRed)];
+    final map = _read(ObdSignal.manifoldPressure);
+    final baro = _read(ObdSignal.baro);
+    return Column(
+      children: [
+        Expanded(
+          child: Center(
+            child: ObdArcGauge(
+              value: bar == null ? null : math.max(0, bar),
+              min: 0,
+              max: 1.6,
+              stops: stops,
+              startLabel: '0',
+              endLabel: '1,6',
+              dimmed: stale,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (bar != null && bar < 0.05)
+                    Text('Vácuo', key: const ValueKey('obdPanel_Turbo'), style: theme.textTheme.displayMedium?.copyWith(fontWeight: FontWeight.w700, color: _valueColor(theme, stale)))
+                  else
+                    _value(theme, 'Turbo', bar == null ? null : _pt(bar, 2), 'bar', theme.textTheme.displayLarge, stale),
+                  Text('pico ${_pt(peak / 100, 2)} bar', key: const ValueKey('obdTurboPeak'), style: theme.textTheme.titleMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
+                ],
+              ),
+            ),
+          ),
+        ),
+        if (widget.fullscreen) ...[
+          const SizedBox(height: 12),
+          _pair(theme, 'Coletor de admissão', _value(theme, 'Coletor', map.value == null ? null : _whole(map.value!), 'kPa', theme.textTheme.headlineSmall, map.stale)),
+          _pair(theme, 'Pressão atmosférica', _value(theme, 'Barométrica', baro.value == null ? null : _whole(baro.value!), 'kPa', theme.textTheme.headlineSmall, baro.stale)),
         ],
       ],
     );

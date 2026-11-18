@@ -331,15 +331,26 @@ class _SparklinePainter extends CustomPainter {
     }
     if (points.length < 2) return;
     final top = math.max(minTop, points.map((p) => p.$2).reduce(math.max) * 1.15);
-    Offset at((double, double) p) => Offset(size.width * (1 - (p.$1 / window).clamp(0.0, 1.0)), size.height * (1 - (p.$2 / top).clamp(0.0, 1.0)));
+    // Negative values (energy flowing back into the battery) open a band
+    // below a zero line.
+    final low = math.min(0.0, points.map((p) => p.$2).reduce(math.min) * 1.15);
+    final span = top - low;
+    Offset at((double, double) p) => Offset(size.width * (1 - (p.$1 / window).clamp(0.0, 1.0)), size.height * (1 - ((p.$2 - low) / span).clamp(0.0, 1.0)));
+    if (low < 0) {
+      final zeroY = size.height * (1 - (0 - low) / span);
+      canvas.drawLine(Offset(0, zeroY), Offset(size.width, zeroY), Paint()
+        ..color = grid
+        ..strokeWidth = 1.5);
+    }
     final line = Path()..moveTo(at(points.first).dx, at(points.first).dy);
     for (final p in points.skip(1)) {
       final o = at(p);
       line.lineTo(o.dx, o.dy);
     }
+    final base = size.height * (1 - (0 - low) / span);
     final area = Path.from(line)
-      ..lineTo(at(points.last).dx, size.height)
-      ..lineTo(at(points.first).dx, size.height)
+      ..lineTo(at(points.last).dx, base)
+      ..lineTo(at(points.first).dx, base)
       ..close();
     canvas.drawPath(
       area,

@@ -28,4 +28,8 @@ const Map<SensorType, List<DisplayStyle>> validDisplayStylesForSensor = {
   SensorType.engineTemperatures: [DisplayStyle.obdPanel],
   SensorType.accelerator: [DisplayStyle.obdPanel],
   SensorType.fuelConsumption: [DisplayStyle.obdPanel],
+  SensorType.hybridBattery: [DisplayStyle.obdPanel],
+  SensorType.energyFlow: [DisplayStyle.obdPanel],
+  SensorType.driveMode: [DisplayStyle.obdPanel],
+  SensorType.turboBoost: [DisplayStyle.obdPanel],
 };
