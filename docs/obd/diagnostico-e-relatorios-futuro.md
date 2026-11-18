@@ -311,4 +311,5 @@ Cada relatório tem "Executar" (desabilitado, com o motivo, sem link), progresso
 - Ativação (READY): queda para 12,0–12,3 V e DC-DC a 13,3 V em menos de 1 s, repetido duas vezes. Tocar com o carro já ligado (≥ 13 V) agora avisa, para em 3 leituras e mantém a medida boa anterior (antes, sobrescrevia com "não percebi").
 - Carga: só elétrico 13,3–13,4 V; com o motor a combustão 13,6 V estável de 1.018 a 1.760 rpm.
 - `ATRV` rende ~8–10 leituras/s com o polling suspenso.
-- Pendentes: Repouso após horas desligado; o `04` físico (o carro não tinha códigos); pausas curtas de ~1,5 s em que o carro não responde (vistas em 16/11) — conferir se o relatório as tolera.
+- Repouso (2026-11-18, após mais de 2 h parado): no Haval o DC-DC carrega o 12 V já com a ignição ligada (13,6 V), então o repouso só vale com a ignição desligada; leu 12,0 V (atenção), estável após ~30 s. Suspeita de queda do adaptador (13,6 V lidos com o DC-DC ligado, que costuma dar 13,8–14,2 V): conferir com multímetro e, se confirmar, prever uma correção por adaptador.
+- Pendentes: o `04` físico (o carro não tinha códigos); pausas curtas de ~1,5 s em que o carro não responde (vistas em 16/11) — conferir se o relatório as tolera.
